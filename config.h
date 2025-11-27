@@ -13,6 +13,11 @@ static const int showbar                   = 0; /* 0 means no bar (hidden by def
 static const int topbar                    = 1; /* 0 means bottom bar */
 static const char *fonts[]                 = {"Hack:size=10"};
 static const float rootcolor[]             = COLOR(0x000000ff);
+
+/* wallpaper settings */
+static const char *wallpaper_dir           = "~/Pictures/Wallpapers"; /* directory containing subdirectories of wallpapers */
+static const int wallpaper_interval        = 300; /* seconds between wallpaper changes, 0 to disable slideshow */
+
 /* This conforms to the xdg-protocol. Set the alpha to zero to restore the old behavior */
 static const float fullscreen_bg[]         = {0.0f, 0.0f, 0.0f, 1.0f}; /* You can also use glsl colors */
 static uint32_t colors[][3]                = {

@@ -1,0 +1,88 @@
+diff --git a/Makefile b/Makefile
+index 32ead49..aaaaaaaa 100644
+--- a/Makefile
++++ b/Makefile
+@@ -20,10 +20,12 @@ TRAYOBJS = systray/watcher.o systray/tray.o systray/item.o systray/icon.o systra
+ TRAYDEPS = systray/watcher.h systray/tray.h systray/item.h systray/icon.h systray/menu.h systray/helpers.h
+
+ all: dwl
+-dwl: dwl.o util.o dbus.o $(TRAYOBJS)
+-	$(CC) dwl.o util.o dbus.o $(TRAYOBJS) $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
++dwl: dwl.o util.o dbus.o wallpaper.o $(TRAYOBJS)
++	$(CC) dwl.o util.o dbus.o wallpaper.o $(TRAYOBJS) $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
+ dwl.o: dwl.c client.h dbus.h config.h config.mk cursor-shape-v1-protocol.h \
+ 	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
+-	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h \
+-	$(TRAYDEPS)
++	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h wallpaper.h \
++	$(TRAYDEPS)
++wallpaper.o: wallpaper.c wallpaper.h stb_image.h
+ util.o: util.c util.h
+diff --git a/dwl.c b/dwl.c
+index c141635..bbbbbbbb 100644
+--- a/dwl.c
++++ b/dwl.c
+@@ -76,6 +76,7 @@
+ #include "systray/tray.h"
+ #include "systray/watcher.h"
++#include "wallpaper.h"
+
+ /* macros */
+ #define MAX(A, B)               ((A) > (B) ? (A) : (B))
+@@ -392,6 +393,8 @@ static void view(const Arg *arg);
+ static void virtualkeyboard(struct wl_listener *listener, void *data);
+ static void virtualpointer(struct wl_listener *listener, void *data);
++static void wallpapernextdir(const Arg *arg);
++static void wallpaperprevdir(const Arg *arg);
+ static Monitor *xytomon(double x, double y);
+ static void xytonode(double x, double y, struct wlr_surface **psurface,
+ 		Client **pc, LayerSurface **pl, double *nx, double *ny);
+@@ -909,6 +912,8 @@ cleanup(void)
+ 		dbus_connection_unref(bus_conn);
+ 	}
+
++	wallpaper_cleanup();
++
+ 	/* If it's not destroyed manually it will cause a use-after-free of wlr_seat.
+ 	 * Destroy it until it's fixed in the wlroots side */
+ 	wlr_backend_destroy(backend);
+@@ -2807,6 +2812,10 @@ setup(void)
+ 		die("couldn't create renderer");
+ 	wl_signal_add(&drw->events.lost, &gpu_reset);
+
++	/* Initialize wallpaper system */
++	wallpaper_init(scene, drw);
++	wallpaper_set_event_loop(event_loop);
++
+ 	/* Create shm, drm and linux_dmabuf interfaces by ourselves.
+ 	 * The simplest way is to call:
+ 	 *      wlr_renderer_init_wl_display(drw);
+@@ -3255,6 +3264,9 @@ updatemons(struct wl_listener *listener, void *data)
+ 	wlr_scene_node_set_position(&root_bg->node, sgeom.x, sgeom.y);
+ 	wlr_scene_rect_set_size(root_bg, sgeom.width, sgeom.height);
+
++	/* Update wallpaper size */
++	wallpaper_resize(sgeom.width, sgeom.height);
++
+ 	/* Make sure the clients are hidden when dwl is locked */
+ 	wlr_scene_node_set_position(&locked_bg->node, sgeom.x, sgeom.y);
+ 	wlr_scene_rect_set_size(locked_bg, sgeom.width, sgeom.height);
+@@ -3428,6 +3440,18 @@ virtualpointer(struct wl_listener *listener, void *data)
+ 		wlr_cursor_map_input_to_output(cursor, device, event->suggested_output);
+ }
+
++void
++wallpapernextdir(const Arg *arg)
++{
++	wallpaper_next_dir();
++}
++
++void
++wallpaperprevdir(const Arg *arg)
++{
++	wallpaper_prev_dir();
++}
++
+ Monitor *
+ xytomon(double x, double y)
+ {
