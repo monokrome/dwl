@@ -1,2 +1,7 @@
 # Binary output
-/dwl
+/bin/*
+
+# Non-git hidden files
+.*
+!.git*
+

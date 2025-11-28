@@ -1,0 +1,117 @@
+--- a/wallpaper.c
++++ b/wallpaper.c
+@@ -18,6 +18,20 @@
+ 
+ #include "wallpaper.h"
+ 
++#include <math.h>
++#ifndef M_PI
++#define M_PI 3.14159265358979323846
++#endif
++
++/* Fallback gradient colors - dark metallic pastel purples */
++#define GRADIENT_COLOR1_R 0x2D
++#define GRADIENT_COLOR1_G 0x1F
++#define GRADIENT_COLOR1_B 0x3D
++#define GRADIENT_COLOR2_R 0x4A
++#define GRADIENT_COLOR2_G 0x3B
++#define GRADIENT_COLOR2_B 0x5C
++#define GRADIENT_ANGLE 33.0 /* degrees */
++
+ #define MAX_DIRS 64
+ #define MAX_IMAGES 256
+ #define MAX_PATH 4096
+@@ -56,6 +70,7 @@
+ 
+ /* Forward declarations */
+ static void load_current_image(void);
++static void load_gradient_fallback(void);
+ static void scan_directories(const char *path);
+ static void scan_images(const char *dir_path);
+ static void free_images(void);
+@@ -288,6 +303,78 @@
+ 	wp.buffer = buffer;
+ }
+ 
++static void load_gradient_fallback(void) {
++	unsigned char *data;
++	size_t stride;
++	double angle_rad, cos_a, sin_a;
++	double max_proj;
++	int x, y;
++	WallpaperBuffer *buffer;
++
++	if (wp.width == 0 || wp.height == 0)
++		return;
++
++	stride = wp.width * 4;
++	data = calloc(1, stride * wp.height);
++	if (!data)
++		return;
++
++	/* Convert angle to radians */
++	angle_rad = GRADIENT_ANGLE * M_PI / 180.0;
++	cos_a = cos(angle_rad);
++	sin_a = sin(angle_rad);
++
++	/* Calculate max projection for normalization */
++	max_proj = fabs(wp.width * cos_a) + fabs(wp.height * sin_a);
++
++	for (y = 0; y < wp.height; y++) {
++		for (x = 0; x < wp.width; x++) {
++			/* Project point onto gradient axis */
++			double proj = x * cos_a + y * sin_a;
++			double t = (proj + max_proj / 2.0) / max_proj;
++
++			/* Clamp t to [0, 1] */
++			if (t < 0.0) t = 0.0;
++			if (t > 1.0) t = 1.0;
++
++			/* Interpolate colors */
++			unsigned char r = (unsigned char)(GRADIENT_COLOR1_R + t * (GRADIENT_COLOR2_R - GRADIENT_COLOR1_R));
++			unsigned char g = (unsigned char)(GRADIENT_COLOR1_G + t * (GRADIENT_COLOR2_G - GRADIENT_COLOR1_G));
++			unsigned char b = (unsigned char)(GRADIENT_COLOR1_B + t * (GRADIENT_COLOR2_B - GRADIENT_COLOR1_B));
++
++			/* BGRA format */
++			unsigned char *pixel = data + (y * wp.width + x) * 4;
++			pixel[0] = b;
++			pixel[1] = g;
++			pixel[2] = r;
++			pixel[3] = 0xFF;
++		}
++	}
++
++	/* Create new buffer */
++	buffer = calloc(1, sizeof(WallpaperBuffer));
++	if (!buffer) {
++		free(data);
++		return;
++	}
++
++	wlr_buffer_init(&buffer->base, &buffer_impl, wp.width, wp.height);
++	buffer->data = data;
++	buffer->format = DRM_FORMAT_ARGB8888;
++	buffer->stride = stride;
++
++	/* Update scene buffer */
++	if (wp.scene_buffer) {
++		wlr_scene_buffer_set_buffer(wp.scene_buffer, &buffer->base);
++		wlr_scene_buffer_set_dest_size(wp.scene_buffer, wp.width, wp.height);
++	}
++
++	/* Release old buffer */
++	if (wp.buffer)
++		wlr_buffer_drop(&wp.buffer->base);
++	wp.buffer = buffer;
++}
++
+ void wallpaper_init(struct wlr_scene *scene, struct wlr_renderer *renderer,
+ 		const char *dir, int interval) {
+ 	char *expanded;
+@@ -422,4 +509,6 @@
+ 
+ 	if (wp.image_count > 0)
+ 		load_current_image();
++	else
++		load_gradient_fallback();
+ }

@@ -1,0 +1,160 @@
+diff --git a/Makefile b/Makefile
+--- a/Makefile
++++ b/Makefile
+@@ -16,6 +16,15 @@ PKGS      = wayland-server xkbcommon libinput pixman-1 fcft $(XLIBS) dbus-1
+ DWLCFLAGS = `$(PKG_CONFIG) --cflags $(PKGS)` $(WLR_INCS) $(DWLCPPFLAGS) $(DWLDEVCFLAGS) $(CFLAGS)
+ LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
+
++# Wren scripting (optional)
++WREN_DIR = ../wren
++WREN_SRC = $(WREN_DIR)/src/vm/wren_vm.c $(WREN_DIR)/src/vm/wren_compiler.c \
++           $(WREN_DIR)/src/vm/wren_core.c $(WREN_DIR)/src/vm/wren_debug.c \
++           $(WREN_DIR)/src/vm/wren_primitive.c $(WREN_DIR)/src/vm/wren_utils.c \
++           $(WREN_DIR)/src/vm/wren_value.c $(WREN_DIR)/src/optional/wren_opt_meta.c \
++           $(WREN_DIR)/src/optional/wren_opt_random.c
++WREN_INC = -I$(WREN_DIR)/src/include -I$(WREN_DIR)/src/vm -I$(WREN_DIR)/src/optional
++
+ TRAYOBJS = systray/watcher.o systray/tray.o systray/item.o systray/icon.o systray/menu.o systray/helpers.o
+ TRAYDEPS = systray/watcher.h systray/tray.h systray/item.h systray/icon.h systray/menu.h systray/helpers.h
+
+@@ -22,6 +31,14 @@ TRAYDEPS = systray/watcher.h systray/tray.h systray/item.h systray/icon.h systra
+ all: dwl
+ dwl: dwl.o util.o dbus.o wallpaper.o $(TRAYOBJS)
+ 	$(CC) dwl.o util.o dbus.o wallpaper.o $(TRAYOBJS) $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
++
++# Build with Wren scripting support
++scripting: DWLCPPFLAGS += -DSCRIPTING $(WREN_INC)
++scripting: dwl.o util.o dbus.o wallpaper.o scripting.o $(TRAYOBJS)
++	$(CC) $(WREN_SRC) dwl.o util.o dbus.o wallpaper.o scripting.o $(TRAYOBJS) $(DWLCFLAGS) $(WREN_INC) $(LDFLAGS) $(LDLIBS) -o dwl
++
++scripting.o: scripting.c scripting.h
++	$(CC) $(CPPFLAGS) $(DWLCFLAGS) -DSCRIPTING $(WREN_INC) -o $@ -c $<
+ dwl.o: dwl.c client.h dbus.h config.h config.mk cursor-shape-v1-protocol.h \
+ 	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
+ 	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h \
+@@ -88,7 +105,7 @@ sirius laptop desktop:
+ 	fi
+
+ clean:
+-	rm -f dwl *.o *-protocol.h systray/*.o config.h config.h.tmp
++	rm -f dwl *.o *-protocol.h systray/*.o config.h config.h.tmp scripting.o
+
+ dist: clean
+ 	mkdir -p dwl-$(VERSION)
+diff --git a/dwl.c b/dwl.c
+--- a/dwl.c
++++ b/dwl.c
+@@ -77,6 +77,7 @@
+ #include "util.h"
+ #include "dbus.h"
+ #include "wallpaper.h"
++#include "scripting.h"
+
+ /* macros */
+ #define MAX(A, B)               ((A) > (B) ? (A) : (B))
+@@ -451,6 +452,10 @@ static struct wl_listener xwayland_ready = {.notify = xwaylandready};
+ #endif
+
+ /* configuration, allows nested code to access above variables */
++#ifdef SCRIPTING
++static void reloadscripts(const Arg *arg);
++#endif
++
+ #include "config.h"
+
+ /* attempt to encapsulate suck into one file */
+@@ -905,6 +914,9 @@ cleanup(void)
+
+ 	wallpaper_cleanup();
+
++	scripting_on_quit();
++	scripting_cleanup();
++
+ 	if (showbar && showsystray) {
+ 		stopbus(bus_conn, bus_source);
+ 		dbus_connection_unref(bus_conn);
+@@ -1355,6 +1369,7 @@ createnotify(struct wl_listener *listener, void *data)
+ 	LISTEN(&toplevel->events.request_fullscreen, &c->fullscreen, fullscreennotify);
+ 	LISTEN(&toplevel->events.request_maximize, &c->maximize, maximizenotify);
+ 	LISTEN(&toplevel->events.set_title, &c->set_title, updatetitle);
++	scripting_on_client_create(c);
+ }
+
+ void
+@@ -1568,6 +1583,7 @@ destroynotify(struct wl_listener *listener, void *data)
+ 		wl_list_remove(&c->unmap.link);
+ 		wl_list_remove(&c->maximize.link);
+ 	}
++	scripting_on_client_destroy(c);
+ 	free(c);
+ }
+
+@@ -1844,6 +1860,7 @@ focusclient(Client *c, int lift)
+
+ 	/* Activate the new client */
+ 	client_activate_surface(client_surface(c), 1);
++	scripting_on_client_focus(c);
+ }
+
+ void
+@@ -2993,6 +3010,10 @@ run(char *startup_cmd)
+ 	wallpaper_init(scene, drw, wallpaper_dir, wallpaper_interval);
+ 	wallpaper_set_event_loop(event_loop);
+
++	/* Initialize Wren scripting */
++	scripting_init();
++	scripting_on_startup();
++
+ 	/* Make sure XWayland clients don't connect to the parent X server,
+ 	 * e.g when running in the x11 backend or the wayland backend and the
+ 	 * compositor has Xwayland support */
+@@ -3661,3 +3682,49 @@ main(int argc, char *argv[])
+ usage:
+ 	die("Usage: %s [-v] [-d] [-s startup command]", argv[0]);
+ }
++
++/* Script wrapper functions for Wren scripting support */
++#ifdef SCRIPTING
++void script_spawn(const char *cmd) {
++	const char *args[] = { "/bin/sh", "-c", cmd, NULL };
++	spawn(&(Arg){ .v = args });
++}
++
++void script_quit(void) {
++	quit(NULL);
++}
++
++void script_focusstack(int dir) {
++	focusstack(&(Arg){ .i = dir });
++}
++
++void script_view(unsigned int tag) {
++	view(&(Arg){ .ui = tag });
++}
++
++void script_tag(unsigned int t) {
++	tag(&(Arg){ .ui = t });
++}
++
++void script_toggleview(unsigned int tag) {
++	toggleview(&(Arg){ .ui = tag });
++}
++
++void script_toggletag(unsigned int tag) {
++	toggletag(&(Arg){ .ui = tag });
++}
++
++void script_setmfact(float f) { setmfact(&(Arg){ .f = f }); }
++void script_incnmaster(int n) { incnmaster(&(Arg){ .i = n }); }
++void script_killclient(void) { killclient(NULL); }
++void script_togglefloating(void) { togglefloating(NULL); }
++void script_togglefullscreen(void) { togglefullscreen(NULL); }
++void script_focusmon(int dir) { focusmon(&(Arg){ .i = dir }); }
++void script_tagmon(int dir) { tagmon(&(Arg){ .i = dir }); }
++
++static void
++reloadscripts(const Arg *arg)
++{
++	scripting_reload();
++}
++#endif /* SCRIPTING */

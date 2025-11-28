@@ -78,30 +78,28 @@ index 578194f..5af3d71 100644
  dist: clean
  	mkdir -p dwl-$(VERSION)
 diff --git a/config.def.h b/config.def.h
-index 95c2afa..b8ccf14 100644
+index 95c2afa..822afb6 100644
 --- a/config.def.h
 +++ b/config.def.h
-@@ -14,6 +14,10 @@ static const float urgentcolor[]           = COLOR(0xff0000ff);
+@@ -14,6 +14,11 @@ static const float urgentcolor[]           = COLOR(0xff0000ff);
  /* This conforms to the xdg-protocol. Set the alpha to zero to restore the old behavior */
  static const float fullscreen_bg[]         = {0.0f, 0.0f, 0.0f, 1.0f}; /* You can also use glsl colors */
 
 +/* wallpaper settings */
 +static const char *wallpaper_dir           = "~/Pictures/Wallpapers"; /* directory containing subdirectories of wallpapers */
 +static const int wallpaper_interval        = 300; /* seconds between wallpaper changes, 0 to disable slideshow */
++static const int wallpaper_mode            = WallpaperTile; /* WallpaperTile, WallpaperCenter, WallpaperFit, WallpaperCover */
 +
  /* tagging - TAGCOUNT must be no greater than 31 */
  #define TAGCOUNT (9)
 
-@@ -159,6 +163,13 @@ static const Key keys[] = {
+@@ -159,6 +164,10 @@ static const Key keys[] = {
  	TAGKEYS(          XKB_KEY_9, XKB_KEY_parenleft,                  8),
  	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_Q,          quit,           {0} },
 
-+	/* Wallpaper image cycling */
-+	{ MODKEY,                    XKB_KEY_bracketright, wallpapernextimg, {0} },
-+	{ MODKEY,                    XKB_KEY_bracketleft,  wallpaperprevimg, {0} },
 +	/* Wallpaper directory cycling */
-+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_braceright,   wallpapernextdir, {0} },
-+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_braceleft,    wallpaperprevdir, {0} },
++	{ MODKEY,                    XKB_KEY_bracketright, wallpapernextdir, {0} },
++	{ MODKEY,                    XKB_KEY_bracketleft,  wallpaperprevdir, {0} },
 +
  	/* Ctrl-Alt-Backspace and Ctrl-Alt-Fx used to be handled by X server */
  	{ WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT,XKB_KEY_Terminate_Server, quit, {0} },
@@ -706,7 +704,7 @@ index 0000000..90cc35b
 +	fcft_fini();
 +}
 diff --git a/dwl.c b/dwl.c
-index 12f441e..93f6b0c 100644
+index 12f441e..51f5fcf 100644
 --- a/dwl.c
 +++ b/dwl.c
 @@ -1,10 +1,12 @@
@@ -843,7 +841,7 @@ index 12f441e..93f6b0c 100644
  static void powermgrsetmode(struct wl_listener *listener, void *data);
  static void quit(const Arg *arg);
  static void rendermon(struct wl_listener *listener, void *data);
-@@ -331,22 +369,32 @@ static void setsel(struct wl_listener *listener, void *data);
+@@ -331,22 +369,30 @@ static void setsel(struct wl_listener *listener, void *data);
  static void setup(void);
  static void spawn(const Arg *arg);
  static void startdrag(struct wl_listener *listener, void *data);
@@ -869,8 +867,6 @@ index 12f441e..93f6b0c 100644
  static void view(const Arg *arg);
  static void virtualkeyboard(struct wl_listener *listener, void *data);
  static void virtualpointer(struct wl_listener *listener, void *data);
-+static void wallpapernextimg(const Arg *arg);
-+static void wallpaperprevimg(const Arg *arg);
 +static void wallpapernextdir(const Arg *arg);
 +static void wallpaperprevdir(const Arg *arg);
  static Monitor *xytomon(double x, double y);
@@ -1504,7 +1500,7 @@ index 12f441e..93f6b0c 100644
  	wlr_log_init(log_level, NULL);
 
  	/* The Wayland display is managed by libwayland. It handles accepting
-@@ -2645,6 +2974,25 @@ setup(void)
+@@ -2645,6 +2974,24 @@ setup(void)
  	wl_signal_add(&output_mgr->events.apply, &output_mgr_apply);
  	wl_signal_add(&output_mgr->events.test, &output_mgr_test);
 
@@ -1523,9 +1519,8 @@ index 12f441e..93f6b0c 100644
 +		watcher_start(&watcher, bus_conn, event_loop);
 +
 +	/* Initialize wallpaper slideshow */
-+	wallpaper_init(scene, drw, wallpaper_dir, wallpaper_interval);
++	wallpaper_init(scene, drw, wallpaper_dir, wallpaper_interval, wallpaper_mode);
 +	wallpaper_set_event_loop(event_loop);
-+	wlr_scene_node_lower_to_bottom(&root_bg->node); /* Put root_bg below wallpaper */
 +
  	/* Make sure XWayland clients don't connect to the parent X server,
  	 * e.g when running in the x11 backend or the wayland backend and the
@@ -1724,22 +1719,10 @@ index 12f441e..93f6b0c 100644
  }
 
  void
-@@ -3003,6 +3437,30 @@ virtualpointer(struct wl_listener *listener, void *data)
+@@ -3003,6 +3437,18 @@ virtualpointer(struct wl_listener *listener, void *data)
  		wlr_cursor_map_input_to_output(cursor, device, event->suggested_output);
  }
 
-+void
-+wallpapernextimg(const Arg *arg)
-+{
-+	wallpaper_next_image();
-+}
-+
-+void
-+wallpaperprevimg(const Arg *arg)
-+{
-+	wallpaper_prev_image();
-+}
-+
 +void
 +wallpapernextdir(const Arg *arg)
 +{
@@ -12167,10 +12150,10 @@ index 0000000..127eb64
 +#endif /* WATCHER_H */
 diff --git a/wallpaper.c b/wallpaper.c
 new file mode 100644
-index 0000000..6efaf93
+index 0000000..d785112
 --- /dev/null
 +++ b/wallpaper.c
-@@ -0,0 +1,439 @@
+@@ -0,0 +1,440 @@
 +/* wallpaper.c - wallpaper slideshow support for dwl */
 +#define STB_IMAGE_IMPLEMENTATION
 +#include "stb_image.h"
@@ -12191,9 +12174,15 @@ index 0000000..6efaf93
 +
 +#include "wallpaper.h"
 +
-+#define MAX_DIRS 64
-+#define MAX_IMAGES 256
 +#define MAX_PATH 4096
++
++/* Scaling modes */
++enum {
++	SCALE_TILE,    /* Tile image without scaling */
++	SCALE_CENTER,  /* Center without scaling */
++	SCALE_FIT,     /* Fit inside screen (may have borders) */
++	SCALE_COVER,   /* Cover screen (may crop) */
++};
 +
 +/* Wallpaper buffer for wlr_scene */
 +typedef struct {
@@ -12204,14 +12193,6 @@ index 0000000..6efaf93
 +} WallpaperBuffer;
 +
 +static struct {
-+	char *dirs[MAX_DIRS];
-+	int dir_count;
-+	int current_dir;
-+
-+	char *images[MAX_IMAGES];
-+	int image_count;
-+	int current_image;
-+
 +	struct wlr_scene_buffer *scene_buffer;
 +	struct wlr_scene *scene;
 +	struct wlr_renderer *renderer;
@@ -12223,17 +12204,18 @@ index 0000000..6efaf93
 +	int width;
 +	int height;
 +	int interval;
++	int scale_mode;
 +
 +	char base_path[MAX_PATH];
++	char current_dir[MAX_PATH];
++	char current_file[MAX_PATH];
 +} wp;
 +
 +/* Forward declarations */
-+static void load_current_image(void);
-+static void scan_directories(const char *path);
-+static void scan_images(const char *dir_path);
-+static void free_images(void);
-+static void free_dirs(void);
++static void load_random_image(void);
 +static char *expand_path(const char *path);
++static char *pick_random_subdir(const char *path);
++static char *pick_random_image(const char *dir_path);
 +
 +/* Buffer implementation */
 +static void buffer_destroy(struct wlr_buffer *wlr_buffer) {
@@ -12275,41 +12257,13 @@ index 0000000..6efaf93
 +	return result;
 +}
 +
-+static int cmp_str(const void *a, const void *b) {
-+	return strcmp(*(const char **)a, *(const char **)b);
-+}
-+
-+static void scan_directories(const char *path) {
-+	DIR *dir, *test;
-+	struct dirent *entry;
-+	char full_path[MAX_PATH];
-+
-+	free_dirs();
-+
-+	dir = opendir(path);
-+	if (!dir) {
-+		fprintf(stderr, "wallpaper: cannot open directory %s\n", path);
-+		return;
++static int is_directory(const char *path) {
++	DIR *dir = opendir(path);
++	if (dir) {
++		closedir(dir);
++		return 1;
 +	}
-+
-+	while ((entry = readdir(dir)) != NULL && wp.dir_count < MAX_DIRS) {
-+		if (entry->d_name[0] == '.')
-+			continue;
-+
-+		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
-+
-+		/* Check if it's a directory */
-+		test = opendir(full_path);
-+		if (test) {
-+			closedir(test);
-+			wp.dirs[wp.dir_count++] = strdup(full_path);
-+		}
-+	}
-+	closedir(dir);
-+
-+	/* Sort directories for consistent ordering */
-+	if (wp.dir_count > 0)
-+		qsort(wp.dirs, wp.dir_count, sizeof(char *), cmp_str);
++	return 0;
 +}
 +
 +static int is_image_file(const char *name) {
@@ -12324,74 +12278,105 @@ index 0000000..6efaf93
 +	        strcasecmp(ext, "gif") == 0);
 +}
 +
-+static void scan_images(const char *dir_path) {
++/* Pick a random subdirectory from path, returns allocated string or NULL */
++static char *pick_random_subdir(const char *path) {
 +	DIR *dir;
 +	struct dirent *entry;
++	char **dirs = NULL;
++	int count = 0;
++	int capacity = 0;
++	char *result = NULL;
++	char full_path[MAX_PATH];
 +
-+	free_images();
++	dir = opendir(path);
++	if (!dir)
++		return NULL;
 +
-+	dir = opendir(dir_path);
-+	if (!dir) {
-+		fprintf(stderr, "wallpaper: cannot open directory %s\n", dir_path);
-+		return;
-+	}
-+
-+	while ((entry = readdir(dir)) != NULL && wp.image_count < MAX_IMAGES) {
++	while ((entry = readdir(dir)) != NULL) {
 +		if (entry->d_name[0] == '.')
 +			continue;
 +
-+		if (is_image_file(entry->d_name)) {
-+			char full_path[MAX_PATH];
-+			snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
-+			wp.images[wp.image_count++] = strdup(full_path);
++		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
++
++		if (is_directory(full_path)) {
++			if (count >= capacity) {
++				capacity = capacity ? capacity * 2 : 16;
++				dirs = realloc(dirs, capacity * sizeof(char *));
++			}
++			dirs[count++] = strdup(full_path);
 +		}
 +	}
 +	closedir(dir);
 +
-+	/* Shuffle images */
-+	if (wp.image_count > 1) {
-+		for (int i = wp.image_count - 1; i > 0; i--) {
-+			int j = rand() % (i + 1);
-+			char *tmp = wp.images[i];
-+			wp.images[i] = wp.images[j];
-+			wp.images[j] = tmp;
++	if (count > 0) {
++		int idx = rand() % count;
++		result = dirs[idx];
++		dirs[idx] = NULL; /* Don't free the one we're returning */
++	}
++
++	/* Free the rest */
++	for (int i = 0; i < count; i++) {
++		if (dirs[i])
++			free(dirs[i]);
++	}
++	free(dirs);
++
++	return result;
++}
++
++/* Pick a random image from dir_path, returns allocated string or NULL */
++static char *pick_random_image(const char *dir_path) {
++	DIR *dir;
++	struct dirent *entry;
++	char **images = NULL;
++	int count = 0;
++	int capacity = 0;
++	char *result = NULL;
++	char full_path[MAX_PATH];
++
++	dir = opendir(dir_path);
++	if (!dir)
++		return NULL;
++
++	while ((entry = readdir(dir)) != NULL) {
++		if (entry->d_name[0] == '.')
++			continue;
++
++		if (is_image_file(entry->d_name)) {
++			snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
++			if (count >= capacity) {
++				capacity = capacity ? capacity * 2 : 16;
++				images = realloc(images, capacity * sizeof(char *));
++			}
++			images[count++] = strdup(full_path);
 +		}
 +	}
-+}
++	closedir(dir);
 +
-+static void free_images(void) {
-+	for (int i = 0; i < wp.image_count; i++) {
-+		free(wp.images[i]);
-+		wp.images[i] = NULL;
++	if (count > 0) {
++		int idx = rand() % count;
++		result = images[idx];
++		images[idx] = NULL;
 +	}
-+	wp.image_count = 0;
-+	wp.current_image = 0;
-+}
 +
-+static void free_dirs(void) {
-+	for (int i = 0; i < wp.dir_count; i++) {
-+		free(wp.dirs[i]);
-+		wp.dirs[i] = NULL;
++	for (int i = 0; i < count; i++) {
++		if (images[i])
++			free(images[i]);
 +	}
-+	wp.dir_count = 0;
-+	wp.current_dir = 0;
++	free(images);
++
++	return result;
 +}
 +
-+static void load_current_image(void) {
-+	const char *path;
++static void load_image_file(const char *path) {
 +	int img_w, img_h, channels;
 +	unsigned char *img_data, *final_data;
-+	float scale_x, scale_y, scale;
-+	int scaled_w, scaled_h, offset_x, offset_y;
 +	size_t stride;
-+	int x, y, src_x, src_y;
-+	unsigned char *src, *dst;
++	int x, y;
 +	WallpaperBuffer *buffer;
 +
-+	if (wp.image_count == 0 || wp.width == 0 || wp.height == 0)
++	if (wp.width == 0 || wp.height == 0)
 +		return;
-+
-+	path = wp.images[wp.current_image];
 +
 +	img_data = stbi_load(path, &img_w, &img_h, &channels, 4);
 +	if (!img_data) {
@@ -12399,17 +12384,6 @@ index 0000000..6efaf93
 +		return;
 +	}
 +
-+	/* Scale image to fit screen while maintaining aspect ratio */
-+	scale_x = (float)wp.width / img_w;
-+	scale_y = (float)wp.height / img_h;
-+	scale = (scale_x > scale_y) ? scale_x : scale_y; /* cover */
-+
-+	scaled_w = (int)(img_w * scale);
-+	scaled_h = (int)(img_h * scale);
-+	offset_x = (wp.width - scaled_w) / 2;
-+	offset_y = (wp.height - scaled_h) / 2;
-+
-+	/* Allocate buffer for final image */
 +	stride = wp.width * 4;
 +	final_data = calloc(1, stride * wp.height);
 +	if (!final_data) {
@@ -12417,27 +12391,59 @@ index 0000000..6efaf93
 +		return;
 +	}
 +
-+	/* Simple nearest-neighbor scaling and centering */
-+	for (y = 0; y < wp.height; y++) {
-+		for (x = 0; x < wp.width; x++) {
-+			src_x = (x - offset_x) * img_w / scaled_w;
-+			src_y = (y - offset_y) * img_h / scaled_h;
-+
-+			if (src_x >= 0 && src_x < img_w && src_y >= 0 && src_y < img_h) {
-+				src = img_data + (src_y * img_w + src_x) * 4;
-+				dst = final_data + (y * wp.width + x) * 4;
-+				/* RGBA to BGRA */
++	if (wp.scale_mode == SCALE_TILE) {
++		/* Tile: repeat image across screen */
++		for (y = 0; y < wp.height; y++) {
++			for (x = 0; x < wp.width; x++) {
++				int src_x = x % img_w;
++				int src_y = y % img_h;
++				unsigned char *src = img_data + (src_y * img_w + src_x) * 4;
++				unsigned char *dst = final_data + (y * wp.width + x) * 4;
 +				dst[0] = src[2]; /* B */
 +				dst[1] = src[1]; /* G */
 +				dst[2] = src[0]; /* R */
 +				dst[3] = src[3]; /* A */
 +			}
 +		}
++	} else {
++		/* For center, fit, cover - calculate scaling */
++		float scale_x = (float)wp.width / img_w;
++		float scale_y = (float)wp.height / img_h;
++		float scale;
++		int scaled_w, scaled_h, offset_x, offset_y;
++
++		if (wp.scale_mode == SCALE_CENTER) {
++			scale = 1.0f; /* No scaling */
++		} else if (wp.scale_mode == SCALE_FIT) {
++			scale = (scale_x < scale_y) ? scale_x : scale_y;
++		} else { /* SCALE_COVER */
++			scale = (scale_x > scale_y) ? scale_x : scale_y;
++		}
++
++		scaled_w = (int)(img_w * scale);
++		scaled_h = (int)(img_h * scale);
++		offset_x = (wp.width - scaled_w) / 2;
++		offset_y = (wp.height - scaled_h) / 2;
++
++		for (y = 0; y < wp.height; y++) {
++			for (x = 0; x < wp.width; x++) {
++				int src_x = (x - offset_x) * img_w / scaled_w;
++				int src_y = (y - offset_y) * img_h / scaled_h;
++
++				if (src_x >= 0 && src_x < img_w && src_y >= 0 && src_y < img_h) {
++					unsigned char *src = img_data + (src_y * img_w + src_x) * 4;
++					unsigned char *dst = final_data + (y * wp.width + x) * 4;
++					dst[0] = src[2]; /* B */
++					dst[1] = src[1]; /* G */
++					dst[2] = src[0]; /* R */
++					dst[3] = src[3]; /* A */
++				}
++			}
++		}
 +	}
 +
 +	stbi_image_free(img_data);
 +
-+	/* Create new buffer */
 +	buffer = calloc(1, sizeof(WallpaperBuffer));
 +	if (!buffer) {
 +		free(final_data);
@@ -12449,20 +12455,49 @@ index 0000000..6efaf93
 +	buffer->format = DRM_FORMAT_ARGB8888;
 +	buffer->stride = stride;
 +
-+	/* Update scene buffer */
 +	if (wp.scene_buffer) {
 +		wlr_scene_buffer_set_buffer(wp.scene_buffer, &buffer->base);
 +		wlr_scene_buffer_set_dest_size(wp.scene_buffer, wp.width, wp.height);
 +	}
 +
-+	/* Release old buffer */
 +	if (wp.buffer)
 +		wlr_buffer_drop(&wp.buffer->base);
 +	wp.buffer = buffer;
++
++	strncpy(wp.current_file, path, MAX_PATH - 1);
++}
++
++static void load_random_image(void) {
++	char *subdir, *image;
++
++	/* If we don't have a current directory, pick one */
++	if (wp.current_dir[0] == '\0') {
++		subdir = pick_random_subdir(wp.base_path);
++		if (!subdir)
++			return;
++		strncpy(wp.current_dir, subdir, MAX_PATH - 1);
++		free(subdir);
++	}
++
++	image = pick_random_image(wp.current_dir);
++	if (!image) {
++		/* No images in current dir, try picking a new subdir */
++		subdir = pick_random_subdir(wp.base_path);
++		if (subdir) {
++			strncpy(wp.current_dir, subdir, MAX_PATH - 1);
++			free(subdir);
++			image = pick_random_image(wp.current_dir);
++		}
++	}
++
++	if (image) {
++		load_image_file(image);
++		free(image);
++	}
 +}
 +
 +void wallpaper_init(struct wlr_scene *scene, struct wlr_renderer *renderer,
-+		const char *dir, int interval) {
++		const char *dir, int interval, int scale_mode) {
 +	char *expanded;
 +
 +	srand(time(NULL));
@@ -12471,8 +12506,8 @@ index 0000000..6efaf93
 +	wp.scene = scene;
 +	wp.renderer = renderer;
 +	wp.interval = interval;
++	wp.scale_mode = scale_mode;
 +
-+	/* Expand path */
 +	expanded = expand_path(dir);
 +	if (!expanded) {
 +		fprintf(stderr, "wallpaper: failed to expand path %s\n", dir);
@@ -12481,24 +12516,14 @@ index 0000000..6efaf93
 +	strncpy(wp.base_path, expanded, MAX_PATH - 1);
 +	free(expanded);
 +
-+	/* Scan for directories */
-+	scan_directories(wp.base_path);
-+
-+	if (wp.dir_count == 0) {
-+		fprintf(stderr, "wallpaper: no directories found in %s\n", wp.base_path);
++	if (!is_directory(wp.base_path)) {
++		fprintf(stderr, "wallpaper: directory does not exist: %s\n", wp.base_path);
 +		return;
 +	}
 +
-+	/* Pick random starting directory */
-+	wp.current_dir = rand() % wp.dir_count;
-+
-+	/* Scan images in that directory */
-+	scan_images(wp.dirs[wp.current_dir]);
-+
-+	/* Create scene buffer (will be positioned at root) */
++	/* Create scene buffer */
 +	wp.scene_buffer = wlr_scene_buffer_create(&scene->tree, NULL);
 +	if (wp.scene_buffer) {
-+		/* Place at very bottom */
 +		wlr_scene_node_lower_to_bottom(&wp.scene_buffer->node);
 +	}
 +}
@@ -12524,61 +12549,30 @@ index 0000000..6efaf93
 +		wlr_buffer_drop(&wp.buffer->base);
 +		wp.buffer = NULL;
 +	}
-+
-+	free_images();
-+	free_dirs();
 +}
 +
 +void wallpaper_next_image(void) {
-+	if (wp.image_count == 0)
-+		return;
-+
-+	wp.current_image = (wp.current_image + 1) % wp.image_count;
-+	load_current_image();
-+}
-+
-+void wallpaper_prev_image(void) {
-+	if (wp.image_count == 0)
-+		return;
-+
-+	wp.current_image = (wp.current_image - 1 + wp.image_count) % wp.image_count;
-+	load_current_image();
++	load_random_image();
 +}
 +
 +void wallpaper_next_dir(void) {
-+	if (wp.dir_count == 0)
-+		return;
-+
-+	wp.current_dir = (wp.current_dir + 1) % wp.dir_count;
-+	scan_images(wp.dirs[wp.current_dir]);
-+
-+	if (wp.image_count > 0) {
-+		wp.current_image = 0;
-+		load_current_image();
++	char *subdir = pick_random_subdir(wp.base_path);
++	if (subdir) {
++		strncpy(wp.current_dir, subdir, MAX_PATH - 1);
++		free(subdir);
++		load_random_image();
++		fprintf(stderr, "wallpaper: switched to %s\n", wp.current_dir);
 +	}
-+
-+	fprintf(stderr, "wallpaper: switched to %s\n", wp.dirs[wp.current_dir]);
 +}
 +
 +void wallpaper_prev_dir(void) {
-+	if (wp.dir_count == 0)
-+		return;
-+
-+	wp.current_dir = (wp.current_dir - 1 + wp.dir_count) % wp.dir_count;
-+	scan_images(wp.dirs[wp.current_dir]);
-+
-+	if (wp.image_count > 0) {
-+		wp.current_image = 0;
-+		load_current_image();
-+	}
-+
-+	fprintf(stderr, "wallpaper: switched to %s\n", wp.dirs[wp.current_dir]);
++	/* With random selection, prev just picks another random dir */
++	wallpaper_next_dir();
 +}
 +
 +int wallpaper_timer_callback(void *data) {
-+	wallpaper_next_image();
++	load_random_image();
 +
-+	/* Reschedule timer */
 +	if (wp.timer && wp.interval > 0) {
 +		wl_event_source_timer_update(wp.timer, wp.interval * 1000);
 +	}
@@ -12593,29 +12587,19 @@ index 0000000..6efaf93
 +	wp.width = width;
 +	wp.height = height;
 +
-+	if (wp.image_count > 0)
-+		load_current_image();
-+}
-+
-+void wallpaper_disable(void) {
-+	if (wp.scene_buffer)
-+		wlr_scene_node_set_enabled(&wp.scene_buffer->node, false);
-+}
-+
-+void wallpaper_enable(void) {
-+	if (wp.scene_buffer)
-+		wlr_scene_node_set_enabled(&wp.scene_buffer->node, true);
-+}
-+
-+int wallpaper_is_enabled(void) {
-+	return wp.scene_buffer && wp.scene_buffer->node.enabled;
++	/* Reload current image at new size */
++	if (wp.current_file[0] != '\0') {
++		load_image_file(wp.current_file);
++	} else {
++		load_random_image();
++	}
 +}
 diff --git a/wallpaper.h b/wallpaper.h
 new file mode 100644
-index 0000000..dae9ff9
+index 0000000..933827b
 --- /dev/null
 +++ b/wallpaper.h
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,41 @@
 +/* wallpaper.h - wallpaper slideshow support for dwl */
 +#ifndef WALLPAPER_H
 +#define WALLPAPER_H
@@ -12623,23 +12607,28 @@ index 0000000..dae9ff9
 +#include <wlr/types/wlr_scene.h>
 +#include <wlr/render/wlr_renderer.h>
 +
-+/* Initialize wallpaper system, scan directories */
++/* Scaling modes for config */
++enum {
++	WallpaperTile,    /* Tile image without scaling */
++	WallpaperCenter,  /* Center without scaling */
++	WallpaperFit,     /* Fit inside screen (may have borders) */
++	WallpaperCover,   /* Cover screen (may crop) */
++};
++
++/* Initialize wallpaper system */
 +void wallpaper_init(struct wlr_scene *scene, struct wlr_renderer *renderer,
-+		const char *dir, int interval);
++		const char *dir, int interval, int scale_mode);
 +
 +/* Clean up wallpaper resources */
 +void wallpaper_cleanup(void);
 +
-+/* Load next image in current directory */
++/* Load next random image in current directory */
 +void wallpaper_next_image(void);
 +
-+/* Load previous image in current directory */
-+void wallpaper_prev_image(void);
-+
-+/* Switch to next directory and load random image from it */
++/* Switch to a random directory and load random image from it */
 +void wallpaper_next_dir(void);
 +
-+/* Switch to previous directory and load random image from it */
++/* Switch to another random directory (same as next_dir with random selection) */
 +void wallpaper_prev_dir(void);
 +
 +/* Timer callback for slideshow */
@@ -12650,14 +12639,5 @@ index 0000000..dae9ff9
 +
 +/* Resize wallpaper to fit output dimensions */
 +void wallpaper_resize(int width, int height);
-+
-+/* Disable wallpaper (hide scene buffer) */
-+void wallpaper_disable(void);
-+
-+/* Enable wallpaper (show scene buffer) */
-+void wallpaper_enable(void);
-+
-+/* Check if wallpaper is enabled */
-+int wallpaper_is_enabled(void);
 +
 +#endif /* WALLPAPER_H */

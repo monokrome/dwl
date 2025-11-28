@@ -18,9 +18,15 @@
 
 #include "wallpaper.h"
 
-#define MAX_DIRS 64
-#define MAX_IMAGES 256
 #define MAX_PATH 4096
+
+/* Scaling modes */
+enum {
+	SCALE_TILE,    /* Tile image without scaling */
+	SCALE_CENTER,  /* Center without scaling */
+	SCALE_FIT,     /* Fit inside screen (may have borders) */
+	SCALE_COVER,   /* Cover screen (may crop) */
+};
 
 /* Wallpaper buffer for wlr_scene */
 typedef struct {
@@ -31,14 +37,6 @@ typedef struct {
 } WallpaperBuffer;
 
 static struct {
-	char *dirs[MAX_DIRS];
-	int dir_count;
-	int current_dir;
-
-	char *images[MAX_IMAGES];
-	int image_count;
-	int current_image;
-
 	struct wlr_scene_buffer *scene_buffer;
 	struct wlr_scene *scene;
 	struct wlr_renderer *renderer;
@@ -50,17 +48,18 @@ static struct {
 	int width;
 	int height;
 	int interval;
+	int scale_mode;
 
 	char base_path[MAX_PATH];
+	char current_dir[MAX_PATH];
+	char current_file[MAX_PATH];
 } wp;
 
 /* Forward declarations */
-static void load_current_image(void);
-static void scan_directories(const char *path);
-static void scan_images(const char *dir_path);
-static void free_images(void);
-static void free_dirs(void);
+static void load_random_image(void);
 static char *expand_path(const char *path);
+static char *pick_random_subdir(const char *path);
+static char *pick_random_image(const char *dir_path);
 
 /* Buffer implementation */
 static void buffer_destroy(struct wlr_buffer *wlr_buffer) {
@@ -102,41 +101,13 @@ static char *expand_path(const char *path) {
 	return result;
 }
 
-static int cmp_str(const void *a, const void *b) {
-	return strcmp(*(const char **)a, *(const char **)b);
-}
-
-static void scan_directories(const char *path) {
-	DIR *dir, *test;
-	struct dirent *entry;
-	char full_path[MAX_PATH];
-
-	free_dirs();
-
-	dir = opendir(path);
-	if (!dir) {
-		fprintf(stderr, "wallpaper: cannot open directory %s\n", path);
-		return;
+static int is_directory(const char *path) {
+	DIR *dir = opendir(path);
+	if (dir) {
+		closedir(dir);
+		return 1;
 	}
-
-	while ((entry = readdir(dir)) != NULL && wp.dir_count < MAX_DIRS) {
-		if (entry->d_name[0] == '.')
-			continue;
-
-		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
-
-		/* Check if it's a directory */
-		test = opendir(full_path);
-		if (test) {
-			closedir(test);
-			wp.dirs[wp.dir_count++] = strdup(full_path);
-		}
-	}
-	closedir(dir);
-
-	/* Sort directories for consistent ordering */
-	if (wp.dir_count > 0)
-		qsort(wp.dirs, wp.dir_count, sizeof(char *), cmp_str);
+	return 0;
 }
 
 static int is_image_file(const char *name) {
@@ -151,74 +122,105 @@ static int is_image_file(const char *name) {
 	        strcasecmp(ext, "gif") == 0);
 }
 
-static void scan_images(const char *dir_path) {
+/* Pick a random subdirectory from path, returns allocated string or NULL */
+static char *pick_random_subdir(const char *path) {
 	DIR *dir;
 	struct dirent *entry;
+	char **dirs = NULL;
+	int count = 0;
+	int capacity = 0;
+	char *result = NULL;
+	char full_path[MAX_PATH];
 
-	free_images();
+	dir = opendir(path);
+	if (!dir)
+		return NULL;
 
-	dir = opendir(dir_path);
-	if (!dir) {
-		fprintf(stderr, "wallpaper: cannot open directory %s\n", dir_path);
-		return;
-	}
-
-	while ((entry = readdir(dir)) != NULL && wp.image_count < MAX_IMAGES) {
+	while ((entry = readdir(dir)) != NULL) {
 		if (entry->d_name[0] == '.')
 			continue;
 
-		if (is_image_file(entry->d_name)) {
-			char full_path[MAX_PATH];
-			snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
-			wp.images[wp.image_count++] = strdup(full_path);
+		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+
+		if (is_directory(full_path)) {
+			if (count >= capacity) {
+				capacity = capacity ? capacity * 2 : 16;
+				dirs = realloc(dirs, capacity * sizeof(char *));
+			}
+			dirs[count++] = strdup(full_path);
 		}
 	}
 	closedir(dir);
 
-	/* Shuffle images */
-	if (wp.image_count > 1) {
-		for (int i = wp.image_count - 1; i > 0; i--) {
-			int j = rand() % (i + 1);
-			char *tmp = wp.images[i];
-			wp.images[i] = wp.images[j];
-			wp.images[j] = tmp;
+	if (count > 0) {
+		int idx = rand() % count;
+		result = dirs[idx];
+		dirs[idx] = NULL; /* Don't free the one we're returning */
+	}
+
+	/* Free the rest */
+	for (int i = 0; i < count; i++) {
+		if (dirs[i])
+			free(dirs[i]);
+	}
+	free(dirs);
+
+	return result;
+}
+
+/* Pick a random image from dir_path, returns allocated string or NULL */
+static char *pick_random_image(const char *dir_path) {
+	DIR *dir;
+	struct dirent *entry;
+	char **images = NULL;
+	int count = 0;
+	int capacity = 0;
+	char *result = NULL;
+	char full_path[MAX_PATH];
+
+	dir = opendir(dir_path);
+	if (!dir)
+		return NULL;
+
+	while ((entry = readdir(dir)) != NULL) {
+		if (entry->d_name[0] == '.')
+			continue;
+
+		if (is_image_file(entry->d_name)) {
+			snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+			if (count >= capacity) {
+				capacity = capacity ? capacity * 2 : 16;
+				images = realloc(images, capacity * sizeof(char *));
+			}
+			images[count++] = strdup(full_path);
 		}
 	}
-}
+	closedir(dir);
 
-static void free_images(void) {
-	for (int i = 0; i < wp.image_count; i++) {
-		free(wp.images[i]);
-		wp.images[i] = NULL;
+	if (count > 0) {
+		int idx = rand() % count;
+		result = images[idx];
+		images[idx] = NULL;
 	}
-	wp.image_count = 0;
-	wp.current_image = 0;
-}
 
-static void free_dirs(void) {
-	for (int i = 0; i < wp.dir_count; i++) {
-		free(wp.dirs[i]);
-		wp.dirs[i] = NULL;
+	for (int i = 0; i < count; i++) {
+		if (images[i])
+			free(images[i]);
 	}
-	wp.dir_count = 0;
-	wp.current_dir = 0;
+	free(images);
+
+	return result;
 }
 
-static void load_current_image(void) {
-	const char *path;
+static void load_image_file(const char *path) {
 	int img_w, img_h, channels;
 	unsigned char *img_data, *final_data;
-	float scale_x, scale_y, scale;
-	int scaled_w, scaled_h, offset_x, offset_y;
 	size_t stride;
-	int x, y, src_x, src_y;
-	unsigned char *src, *dst;
+	int x, y;
 	WallpaperBuffer *buffer;
 
-	if (wp.image_count == 0 || wp.width == 0 || wp.height == 0)
+	if (wp.width == 0 || wp.height == 0)
 		return;
-
-	path = wp.images[wp.current_image];
 
 	img_data = stbi_load(path, &img_w, &img_h, &channels, 4);
 	if (!img_data) {
@@ -226,17 +228,6 @@ static void load_current_image(void) {
 		return;
 	}
 
-	/* Scale image to fit screen while maintaining aspect ratio */
-	scale_x = (float)wp.width / img_w;
-	scale_y = (float)wp.height / img_h;
-	scale = (scale_x > scale_y) ? scale_x : scale_y; /* cover */
-
-	scaled_w = (int)(img_w * scale);
-	scaled_h = (int)(img_h * scale);
-	offset_x = (wp.width - scaled_w) / 2;
-	offset_y = (wp.height - scaled_h) / 2;
-
-	/* Allocate buffer for final image */
 	stride = wp.width * 4;
 	final_data = calloc(1, stride * wp.height);
 	if (!final_data) {
@@ -244,27 +235,59 @@ static void load_current_image(void) {
 		return;
 	}
 
-	/* Simple nearest-neighbor scaling and centering */
-	for (y = 0; y < wp.height; y++) {
-		for (x = 0; x < wp.width; x++) {
-			src_x = (x - offset_x) * img_w / scaled_w;
-			src_y = (y - offset_y) * img_h / scaled_h;
-
-			if (src_x >= 0 && src_x < img_w && src_y >= 0 && src_y < img_h) {
-				src = img_data + (src_y * img_w + src_x) * 4;
-				dst = final_data + (y * wp.width + x) * 4;
-				/* RGBA to BGRA */
+	if (wp.scale_mode == SCALE_TILE) {
+		/* Tile: repeat image across screen */
+		for (y = 0; y < wp.height; y++) {
+			for (x = 0; x < wp.width; x++) {
+				int src_x = x % img_w;
+				int src_y = y % img_h;
+				unsigned char *src = img_data + (src_y * img_w + src_x) * 4;
+				unsigned char *dst = final_data + (y * wp.width + x) * 4;
 				dst[0] = src[2]; /* B */
 				dst[1] = src[1]; /* G */
 				dst[2] = src[0]; /* R */
 				dst[3] = src[3]; /* A */
 			}
 		}
+	} else {
+		/* For center, fit, cover - calculate scaling */
+		float scale_x = (float)wp.width / img_w;
+		float scale_y = (float)wp.height / img_h;
+		float scale;
+		int scaled_w, scaled_h, offset_x, offset_y;
+
+		if (wp.scale_mode == SCALE_CENTER) {
+			scale = 1.0f; /* No scaling */
+		} else if (wp.scale_mode == SCALE_FIT) {
+			scale = (scale_x < scale_y) ? scale_x : scale_y;
+		} else { /* SCALE_COVER */
+			scale = (scale_x > scale_y) ? scale_x : scale_y;
+		}
+
+		scaled_w = (int)(img_w * scale);
+		scaled_h = (int)(img_h * scale);
+		offset_x = (wp.width - scaled_w) / 2;
+		offset_y = (wp.height - scaled_h) / 2;
+
+		for (y = 0; y < wp.height; y++) {
+			for (x = 0; x < wp.width; x++) {
+				int src_x = (x - offset_x) * img_w / scaled_w;
+				int src_y = (y - offset_y) * img_h / scaled_h;
+
+				if (src_x >= 0 && src_x < img_w && src_y >= 0 && src_y < img_h) {
+					unsigned char *src = img_data + (src_y * img_w + src_x) * 4;
+					unsigned char *dst = final_data + (y * wp.width + x) * 4;
+					dst[0] = src[2]; /* B */
+					dst[1] = src[1]; /* G */
+					dst[2] = src[0]; /* R */
+					dst[3] = src[3]; /* A */
+				}
+			}
+		}
 	}
 
 	stbi_image_free(img_data);
 
-	/* Create new buffer */
 	buffer = calloc(1, sizeof(WallpaperBuffer));
 	if (!buffer) {
 		free(final_data);
@@ -276,20 +299,49 @@ static void load_current_image(void) {
 	buffer->format = DRM_FORMAT_ARGB8888;
 	buffer->stride = stride;
 
-	/* Update scene buffer */
 	if (wp.scene_buffer) {
 		wlr_scene_buffer_set_buffer(wp.scene_buffer, &buffer->base);
 		wlr_scene_buffer_set_dest_size(wp.scene_buffer, wp.width, wp.height);
 	}
 
-	/* Release old buffer */
 	if (wp.buffer)
 		wlr_buffer_drop(&wp.buffer->base);
 	wp.buffer = buffer;
+
+	strncpy(wp.current_file, path, MAX_PATH - 1);
+}
+
+static void load_random_image(void) {
+	char *subdir, *image;
+
+	/* If we don't have a current directory, pick one */
+	if (wp.current_dir[0] == '\0') {
+		subdir = pick_random_subdir(wp.base_path);
+		if (!subdir)
+			return;
+		strncpy(wp.current_dir, subdir, MAX_PATH - 1);
+		free(subdir);
+	}
+
+	image = pick_random_image(wp.current_dir);
+	if (!image) {
+		/* No images in current dir, try picking a new subdir */
+		subdir = pick_random_subdir(wp.base_path);
+		if (subdir) {
+			strncpy(wp.current_dir, subdir, MAX_PATH - 1);
+			free(subdir);
+			image = pick_random_image(wp.current_dir);
+		}
+	}
+
+	if (image) {
+		load_image_file(image);
+		free(image);
+	}
 }
 
 void wallpaper_init(struct wlr_scene *scene, struct wlr_renderer *renderer,
-		const char *dir, int interval) {
+		const char *dir, int interval, int scale_mode) {
 	char *expanded;
 
 	srand(time(NULL));
@@ -298,8 +350,8 @@ void wallpaper_init(struct wlr_scene *scene, struct wlr_renderer *renderer,
 	wp.scene = scene;
 	wp.renderer = renderer;
 	wp.interval = interval;
+	wp.scale_mode = scale_mode;
 
-	/* Expand path */
 	expanded = expand_path(dir);
 	if (!expanded) {
 		fprintf(stderr, "wallpaper: failed to expand path %s\n", dir);
@@ -308,24 +360,14 @@ void wallpaper_init(struct wlr_scene *scene, struct wlr_renderer *renderer,
 	strncpy(wp.base_path, expanded, MAX_PATH - 1);
 	free(expanded);
 
-	/* Scan for directories */
-	scan_directories(wp.base_path);
-
-	if (wp.dir_count == 0) {
-		fprintf(stderr, "wallpaper: no directories found in %s\n", wp.base_path);
+	if (!is_directory(wp.base_path)) {
+		fprintf(stderr, "wallpaper: directory does not exist: %s\n", wp.base_path);
 		return;
 	}
 
-	/* Pick random starting directory */
-	wp.current_dir = rand() % wp.dir_count;
-
-	/* Scan images in that directory */
-	scan_images(wp.dirs[wp.current_dir]);
-
-	/* Create scene buffer (will be positioned at root) */
+	/* Create scene buffer */
 	wp.scene_buffer = wlr_scene_buffer_create(&scene->tree, NULL);
 	if (wp.scene_buffer) {
-		/* Place at very bottom */
 		wlr_scene_node_lower_to_bottom(&wp.scene_buffer->node);
 	}
 }
@@ -351,53 +393,30 @@ void wallpaper_cleanup(void) {
 		wlr_buffer_drop(&wp.buffer->base);
 		wp.buffer = NULL;
 	}
-
-	free_images();
-	free_dirs();
 }
 
 void wallpaper_next_image(void) {
-	if (wp.image_count == 0)
-		return;
-
-	wp.current_image = (wp.current_image + 1) % wp.image_count;
-	load_current_image();
+	load_random_image();
 }
 
 void wallpaper_next_dir(void) {
-	if (wp.dir_count == 0)
-		return;
-
-	wp.current_dir = (wp.current_dir + 1) % wp.dir_count;
-	scan_images(wp.dirs[wp.current_dir]);
-
-	if (wp.image_count > 0) {
-		wp.current_image = 0;
-		load_current_image();
+	char *subdir = pick_random_subdir(wp.base_path);
+	if (subdir) {
+		strncpy(wp.current_dir, subdir, MAX_PATH - 1);
+		free(subdir);
+		load_random_image();
+		fprintf(stderr, "wallpaper: switched to %s\n", wp.current_dir);
 	}
-
-	fprintf(stderr, "wallpaper: switched to %s\n", wp.dirs[wp.current_dir]);
 }
 
 void wallpaper_prev_dir(void) {
-	if (wp.dir_count == 0)
-		return;
-
-	wp.current_dir = (wp.current_dir - 1 + wp.dir_count) % wp.dir_count;
-	scan_images(wp.dirs[wp.current_dir]);
-
-	if (wp.image_count > 0) {
-		wp.current_image = 0;
-		load_current_image();
-	}
-
-	fprintf(stderr, "wallpaper: switched to %s\n", wp.dirs[wp.current_dir]);
+	/* With random selection, prev just picks another random dir */
+	wallpaper_next_dir();
 }
 
 int wallpaper_timer_callback(void *data) {
-	wallpaper_next_image();
+	load_random_image();
 
-	/* Reschedule timer */
 	if (wp.timer && wp.interval > 0) {
 		wl_event_source_timer_update(wp.timer, wp.interval * 1000);
 	}
@@ -412,6 +431,10 @@ void wallpaper_resize(int width, int height) {
 	wp.width = width;
 	wp.height = height;
 
-	if (wp.image_count > 0)
-		load_current_image();
+	/* Reload current image at new size */
+	if (wp.current_file[0] != '\0') {
+		load_image_file(wp.current_file);
+	} else {
+		load_random_image();
+	}
 }

@@ -146,6 +146,9 @@ static const Key keys[] = {
 	{ MODKEY,                    XKB_KEY_d,          incnmaster,     {.i = -1} },
 	{ MODKEY,                    XKB_KEY_h,          setmfact,       {.f = -0.05f} },
 	{ MODKEY,                    XKB_KEY_l,          setmfact,       {.f = +0.05f} },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_H,          setcfact,       {.f = -0.25f} },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_L,          setcfact,       {.f = +0.25f} },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_O,          setcfact,       {.f = 0.0f} },
 	{ MODKEY,                    XKB_KEY_Return,     zoom,           {0} },
 	{ MODKEY,                    XKB_KEY_Tab,        view,           {0} },
 	{ MODKEY,                    XKB_KEY_q,          killclient,     {0} },
@@ -166,6 +169,16 @@ static const Key keys[] = {
 	TAGKEYS(          XKB_KEY_3, XKB_KEY_numbersign,                 2),
 	TAGKEYS(          XKB_KEY_4, XKB_KEY_dollar,                     3),
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_Q,          quit,           {0} },
+#ifdef SCRIPTING
+	{ MODKEY,                    XKB_KEY_grave,      reloadscripts,  {0} },
+#endif
+
+	/* Wallpaper image cycling */
+	{ MODKEY,                    XKB_KEY_bracketright, wallpapernextimg, {0} },
+	{ MODKEY,                    XKB_KEY_bracketleft,  wallpaperprevimg, {0} },
+	/* Wallpaper directory cycling */
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_braceright,   wallpapernextdir, {0} },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_braceleft,    wallpaperprevdir, {0} },
 
 	/* Ctrl-Alt-Backspace and Ctrl-Alt-Fx used to be handled by X server */
 	{ WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT,XKB_KEY_Terminate_Server, quit, {0} },
