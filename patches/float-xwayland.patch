@@ -1,0 +1,12 @@
+--- a/dwl.c
++++ b/dwl.c
+@@ -568,6 +568,9 @@ applyrules(Client *c)
+ 		}
+ 	}
+
++	/* Float all XWayland clients - they often break when tiled */
++	c->isfloating |= client_is_x11(c);
++
+ 	c->isfloating |= client_is_float_type(c);
+ 	setmon(c, mon, newtags);
+ }

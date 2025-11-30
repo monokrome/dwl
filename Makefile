@@ -1,13 +1,14 @@
 # dwl-config Makefile
 # Applies patches to dwl submodule and builds
 
-PATCHES = patches/combined.patch patches/gradient.patch patches/cfact.patch
-WREN_PATCH = patches/wren.patch
+BIN_DIR = bin
+SRC_DIR = src
+DWL_DIR = lib/dwl
+WREN_DIR = lib/wren
+PATCHES = patches/combined.patch patches/gradient.patch patches/cfact.patch patches/movestack.patch patches/float-xwayland.patch
+SCRIPTING_PATCHES = patches/wren.patch
 HOSTNAME ?= $(shell hostname)
 MONITOR_CONFIG = monitors/$(HOSTNAME).h
-DWL_DIR = dwl
-BIN_DIR = bin
-WREN_DIR = wren
 
 .PHONY: all wren build clean unpatch install uninstall
 
@@ -31,7 +32,7 @@ patch: $(DWL_DIR)/.git
 		echo "    Applying $$p..."; \
 		patch -d $(DWL_DIR) -p1 < $$p || exit 1; \
 	done
-	cp config.h $(DWL_DIR)/config.h
+	cp $(SRC_DIR)/config.h $(DWL_DIR)/config.h
 	@if [ -f "$(MONITOR_CONFIG)" ]; then \
 		mkdir -p $(DWL_DIR)/monitors; \
 		cp $(MONITOR_CONFIG) $(DWL_DIR)/monitors/; \
@@ -39,13 +40,13 @@ patch: $(DWL_DIR)/.git
 
 # Apply wren scripting patch (after combined patch)
 patch-wren: $(WREN_DIR)/.git
-	@echo "    Applying $(WREN_PATCH)..."
-	patch -d $(DWL_DIR) -p1 < $(WREN_PATCH)
+	@echo "    Applying $(SCRIPTING_PATCHES)..."
+	patch -d $(DWL_DIR) -p1 < $(SCRIPTING_PATCHES)
 
 # Copy wren scripting files to dwl directory
 copy-wren-files:
-	cp scripting.c $(DWL_DIR)/
-	cp scripting.h $(DWL_DIR)/
+	cp $(SRC_DIR)/scripting.c $(DWL_DIR)/
+	cp $(SRC_DIR)/scripting.h $(DWL_DIR)/
 
 # Build dwl (standard)
 build:

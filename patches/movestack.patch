@@ -1,0 +1,48 @@
+--- a/dwl.c	2025-11-27 19:48:01.648895719 -0800
++++ b/dwl.c	2025-11-27 19:48:25.185963284 -0800
+@@ -344,6 +344,7 @@
+ static void motionnotify(uint32_t time, struct wlr_input_device *device, double sx,
+ 		double sy, double sx_unaccel, double sy_unaccel);
+ static void motionrelative(struct wl_listener *listener, void *data);
++static void movestack(const Arg *arg);
+ static void moveresize(const Arg *arg);
+ static void outputmgrapply(struct wl_listener *listener, void *data);
+ static void outputmgrapplyortest(struct wlr_output_configuration_v1 *config, int test);
+@@ -2316,6 +2317,37 @@
+ }
+ 
+ void
++movestack(const Arg *arg)
++{
++	Client *c, *sel = focustop(selmon);
++	if (!sel || sel->isfloating)
++		return;
++
++	if (arg->i > 0) {
++		wl_list_for_each(c, &sel->link, link) {
++			if (&c->link == &clients)
++				break;
++			if (VISIBLEON(c, selmon) && !c->isfloating) {
++				wl_list_remove(&sel->link);
++				wl_list_insert(&c->link, &sel->link);
++				break;
++			}
++		}
++	} else {
++		wl_list_for_each_reverse(c, &sel->link, link) {
++			if (&c->link == &clients)
++				break;
++			if (VISIBLEON(c, selmon) && !c->isfloating) {
++				wl_list_remove(&sel->link);
++				wl_list_insert(c->link.prev, &sel->link);
++				break;
++			}
++		}
++	}
++	arrange(selmon);
++}
++
++void
+ motionrelative(struct wl_listener *listener, void *data)
+ {
+ 	/* This event is forwarded by the cursor when a pointer emits a _relative_

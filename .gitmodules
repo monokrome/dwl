@@ -1,3 +1,6 @@
-[submodule "dwl"]
-	path = dwl
-	url = https://codeberg.org/dwl/dwl.git
+[submodule "lib/wren"]
+	path = lib/wren
+	url = https://github.com/wren-lang/wren
+[submodule "lib/dwl"]
+	path = lib/dwl
+	url = https://github.com/djpohly/dwl
