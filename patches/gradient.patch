@@ -1,5 +1,5 @@
---- a/wallpaper.c
-+++ b/wallpaper.c
+--- a/lib/lib/dwl/dwl/wallpaper.c
++++ b/lib/dwl/wallpaper.c
 @@ -18,6 +18,20 @@
  
  #include "wallpaper.h"

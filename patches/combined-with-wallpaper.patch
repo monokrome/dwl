@@ -1,7 +1,7 @@
-diff --git a/Makefile b/Makefile
+diff --git a/lib/lib/dwl/dwl/Makefile b/lib/dwl/Makefile
 index 578194f..5af3d71 100644
---- a/Makefile
-+++ b/Makefile
+--- a/lib/lib/dwl/dwl/Makefile
++++ b/lib/dwl/Makefile
 @@ -12,17 +12,29 @@ DWLDEVCFLAGS = -g -Wpedantic -Wall -Wextra -Wdeclaration-after-statement \
  	-Wfloat-conversion
 
@@ -77,10 +77,10 @@ index 578194f..5af3d71 100644
 
  dist: clean
  	mkdir -p dwl-$(VERSION)
-diff --git a/config.def.h b/config.def.h
+diff --git a/lib/lib/dwl/dwl/config.def.h b/lib/dwl/config.def.h
 index 95c2afa..822afb6 100644
---- a/config.def.h
-+++ b/config.def.h
+--- a/lib/lib/dwl/dwl/config.def.h
++++ b/lib/dwl/config.def.h
 @@ -14,6 +14,11 @@ static const float urgentcolor[]           = COLOR(0xff0000ff);
  /* This conforms to the xdg-protocol. Set the alpha to zero to restore the old behavior */
  static const float fullscreen_bg[]         = {0.0f, 0.0f, 0.0f, 1.0f}; /* You can also use glsl colors */
@@ -104,10 +104,10 @@ index 95c2afa..822afb6 100644
  	/* Ctrl-Alt-Backspace and Ctrl-Alt-Fx used to be handled by X server */
  	{ WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT,XKB_KEY_Terminate_Server, quit, {0} },
  	/* Ctrl-Alt-Fx is used to switch to another VT, if you don't know what a VT is
-diff --git a/config.mk b/config.mk
+diff --git a/lib/lib/dwl/dwl/config.mk b/lib/dwl/config.mk
 index eb08a05..2065142 100644
---- a/config.mk
-+++ b/config.mk
+--- a/lib/lib/dwl/dwl/config.mk
++++ b/lib/dwl/config.mk
 @@ -24,11 +24,9 @@ WLR_LIBS = `$(PKG_CONFIG) --libs wlroots-0.19`
  #	-I$(PWD)/wlroots/0.19/include/wlroots-0.19
  #WLR_LIBS = -Wl,-rpath,$(PWD)/wlroots/0.19/lib64 -L$(PWD)/wlroots/0.19/lib64 -lwlroots-0.19
@@ -122,11 +122,11 @@ index eb08a05..2065142 100644
 
  # dwl itself only uses C99 features, but wlroots' headers use anonymous unions (C11).
  # To avoid warnings about them, we do not use -std=c99 and instead of using the
-diff --git a/dbus.c b/dbus.c
+diff --git a/lib/lib/dwl/dwl/dbus.c b/lib/dwl/dbus.c
 new file mode 100644
 index 0000000..125312c
 --- /dev/null
-+++ b/dbus.c
++++ b/lib/dwl/dbus.c
 @@ -0,0 +1,242 @@
 +#include "dbus.h"
 +
@@ -370,11 +370,11 @@ index 0000000..125312c
 +	                                      NULL);
 +	dbus_connection_set_dispatch_status_function(conn, NULL, NULL, NULL);
 +}
-diff --git a/dbus.h b/dbus.h
+diff --git a/lib/lib/dwl/dwl/dbus.h b/lib/dwl/dbus.h
 new file mode 100644
 index 0000000..b374b98
 --- /dev/null
-+++ b/dbus.h
++++ b/lib/dwl/dbus.h
 @@ -0,0 +1,10 @@
 +#ifndef DWLDBUS_H
 +#define DWLDBUS_H
@@ -386,11 +386,11 @@ index 0000000..b374b98
 +void stopbus (DBusConnection *conn, struct wl_event_source *bus_source);
 +
 +#endif /* DWLDBUS_H */
-diff --git a/drwl.h b/drwl.h
+diff --git a/lib/lib/dwl/dwl/drwl.h b/lib/dwl/drwl.h
 new file mode 100644
 index 0000000..90cc35b
 --- /dev/null
-+++ b/drwl.h
++++ b/lib/dwl/drwl.h
 @@ -0,0 +1,311 @@
 +/*
 + * drwl - https://codeberg.org/sewn/drwl
@@ -419,7 +419,7 @@ index 0000000..90cc35b
 + *
 + * The UTF-8 Decoder included is from Bjoern Hoehrmann:
 + * Copyright (c) 2008-2010 Bjoern Hoehrmann <bjoern@hoehrmann.de>
-+ * See http://bjoern.hoehrmann.de/utf-8/decoder/dfa/ for details.
++ * See http://bjoern.hoehrmann.de/utf-8/decoder/dfa/lib/lib/dwl/dwl/ for details.
 + */
 +#pragma once
 +
@@ -703,10 +703,10 @@ index 0000000..90cc35b
 +{
 +	fcft_fini();
 +}
-diff --git a/dwl.c b/dwl.c
+diff --git a/lib/lib/dwl/dwl/dwl.c b/lib/dwl/dwl.c
 index 12f441e..51f5fcf 100644
---- a/dwl.c
-+++ b/dwl.c
+--- a/lib/lib/dwl/dwl/dwl.c
++++ b/lib/dwl/dwl.c
 @@ -1,10 +1,12 @@
  /*
   * See LICENSE file for copyright and license details.
@@ -1775,11 +1775,11 @@ index 12f441e..51f5fcf 100644
  }
 
  void
-diff --git a/stb_image.h b/stb_image.h
+diff --git a/lib/lib/dwl/dwl/stb_image.h b/lib/dwl/stb_image.h
 new file mode 100644
 index 0000000..9eedabe
 --- /dev/null
-+++ b/stb_image.h
++++ b/lib/dwl/stb_image.h
 @@ -0,0 +1,7988 @@
 +/* stb_image - v2.30 - public domain image loader - http://nothings.org/stb
 +                                  no warranty implied; use at your own risk
@@ -1816,7 +1816,7 @@ index 0000000..9eedabe
 +      PNM (PPM and PGM binary only)
 +
 +      Animated GIF still needs a proper API, but here's one way to do it:
-+          http://gist.github.com/urraka/685d9a6340b26b830d49
++          http://gist.github.com/urraka/lib/lib/dwl/dwl/685d9a6340b26b830d49
 +
 +      - decode from memory or through FILE (define STBI_NO_STDIO to remove code)
 +      - decode from arbitrary I/O callbacks
@@ -2497,7 +2497,7 @@ index 0000000..9eedabe
 +// As a result, enabling SSE2 on 32-bit MinGW is dangerous when not
 +// simultaneously enabling "-mstackrealign".
 +//
-+// See https://github.com/nothings/stb/issues/81 for more information.
++// See https://github.com/nothings/stb/lib/dwl/issues/81 for more information.
 +//
 +// So default to no SSE2 on 32-bit MinGW. If you've read this far and added
 +// -mstackrealign to your build settings, feel free to #define STBI_MINGW_ENABLE_SSE2.
@@ -4344,7 +4344,7 @@ index 0000000..9eedabe
 +      __m128i out##_l = _mm_sub_epi32(a##_l, b##_l); \
 +      __m128i out##_h = _mm_sub_epi32(a##_h, b##_h)
 +
-+   // butterfly a/b, add bias, then shift by "s" and pack
++   // butterfly a/lib/lib/dwl/dwl/b, add bias, then shift by "s" and pack
 +   #define dct_bfly32o(out0, out1, a,b,bias,s) \
 +      { \
 +         __m128i abiased_l = _mm_add_epi32(a##_l, bias); \
@@ -4530,7 +4530,7 @@ index 0000000..9eedabe
 +   int32x4_t out##_l = vsubq_s32(a##_l, b##_l); \
 +   int32x4_t out##_h = vsubq_s32(a##_h, b##_h)
 +
-+// butterfly a/b, then shift using "shiftop" by "s" and pack
++// butterfly a/lib/lib/dwl/dwl/b, then shift using "shiftop" by "s" and pack
 +#define dct_bfly32o(out0,out1, a,b,shiftop,s) \
 +   { \
 +      dct_wadd(sum, a, b); \
@@ -5570,7 +5570,7 @@ index 0000000..9eedabe
 +         o.val[2] = vqrshrun_n_s16(bws, 4);
 +         o.val[3] = vdup_n_u8(255);
 +
-+         // store, interleaving r/g/b/a
++         // store, interleaving r/g/b/lib/dwl/a
 +         vst4_u8(out, o);
 +         out += 8*4;
 +      }
@@ -9769,11 +9769,11 @@ index 0000000..9eedabe
 +WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 +------------------------------------------------------------------------------
 +*/
-diff --git a/systray/helpers.c b/systray/helpers.c
+diff --git a/lib/lib/dwl/dwl/systray/helpers.c b/lib/dwl/systray/helpers.c
 new file mode 100644
 index 0000000..d1af9f8
 --- /dev/null
-+++ b/systray/helpers.c
++++ b/lib/dwl/systray/helpers.c
 @@ -0,0 +1,43 @@
 +#include "helpers.h"
 +
@@ -9818,11 +9818,11 @@ index 0000000..d1af9f8
 +		dbus_message_unref(msg);
 +	return r;
 +}
-diff --git a/systray/helpers.h b/systray/helpers.h
+diff --git a/lib/lib/dwl/dwl/systray/helpers.h b/lib/dwl/systray/helpers.h
 new file mode 100644
 index 0000000..2c592e0
 --- /dev/null
-+++ b/systray/helpers.h
++++ b/lib/dwl/systray/helpers.h
 @@ -0,0 +1,12 @@
 +#ifndef HELPERS_H
 +#define HELPERS_H
@@ -9836,11 +9836,11 @@ index 0000000..2c592e0
 +                      PropHandler handler, void *data);
 +
 +#endif /* HELPERS_H */
-diff --git a/systray/icon.c b/systray/icon.c
+diff --git a/lib/lib/dwl/dwl/systray/icon.c b/lib/dwl/systray/icon.c
 new file mode 100644
 index 0000000..1b97866
 --- /dev/null
-+++ b/systray/icon.c
++++ b/lib/dwl/systray/icon.c
 @@ -0,0 +1,149 @@
 +#include "icon.h"
 +
@@ -9991,11 +9991,11 @@ index 0000000..1b97866
 +
 +	return 0;
 +}
-diff --git a/systray/icon.h b/systray/icon.h
+diff --git a/lib/lib/dwl/dwl/systray/icon.h b/lib/dwl/systray/icon.h
 new file mode 100644
 index 0000000..20f281b
 --- /dev/null
-+++ b/systray/icon.h
++++ b/lib/dwl/systray/icon.h
 @@ -0,0 +1,26 @@
 +#ifndef ICON_H
 +#define ICON_H
@@ -10023,11 +10023,11 @@ index 0000000..20f281b
 +int resize_image (pixman_image_t *orig, int new_width, int new_height);
 +
 +#endif /* ICON_H */
-diff --git a/systray/item.c b/systray/item.c
+diff --git a/lib/lib/dwl/dwl/systray/item.c b/lib/dwl/systray/item.c
 new file mode 100644
 index 0000000..4359a28
 --- /dev/null
-+++ b/systray/item.c
++++ b/lib/dwl/systray/item.c
 @@ -0,0 +1,403 @@
 +#include "item.h"
 +
@@ -10432,11 +10432,11 @@ index 0000000..4359a28
 +	if (msg)
 +		dbus_message_unref(msg);
 +}
-diff --git a/systray/item.h b/systray/item.h
+diff --git a/lib/lib/dwl/dwl/systray/item.h b/lib/dwl/systray/item.h
 new file mode 100644
 index 0000000..dc22e25
 --- /dev/null
-+++ b/systray/item.h
++++ b/lib/dwl/systray/item.h
 @@ -0,0 +1,46 @@
 +#ifndef ITEM_H
 +#define ITEM_H
@@ -10484,11 +10484,11 @@ index 0000000..dc22e25
 +void item_show_menu (Item *item);
 +
 +#endif /* ITEM_H */
-diff --git a/systray/menu.c b/systray/menu.c
+diff --git a/lib/lib/dwl/dwl/systray/menu.c b/lib/dwl/systray/menu.c
 new file mode 100644
 index 0000000..ff3bfb5
 --- /dev/null
-+++ b/systray/menu.c
++++ b/lib/dwl/systray/menu.c
 @@ -0,0 +1,757 @@
 +#include "menu.h"
 +
@@ -11247,11 +11247,11 @@ index 0000000..ff3bfb5
 +		dbus_message_unref(msg);
 +	free(menu);
 +}
-diff --git a/systray/menu.h b/systray/menu.h
+diff --git a/lib/lib/dwl/dwl/systray/menu.h b/lib/dwl/systray/menu.h
 new file mode 100644
 index 0000000..7f48ada
 --- /dev/null
-+++ b/systray/menu.h
++++ b/lib/dwl/systray/menu.h
 @@ -0,0 +1,11 @@
 +#ifndef MENU_H
 +#define MENU_H
@@ -11264,11 +11264,11 @@ index 0000000..7f48ada
 +                const char *busname, const char *busobj, const char **menucmd);
 +
 +#endif /* MENU_H */
-diff --git a/systray/tray.c b/systray/tray.c
+diff --git a/lib/lib/dwl/dwl/systray/tray.c b/lib/dwl/systray/tray.c
 new file mode 100644
 index 0000000..7f9b1b0
 --- /dev/null
-+++ b/systray/tray.c
++++ b/lib/dwl/systray/tray.c
 @@ -0,0 +1,237 @@
 +#include "tray.h"
 +
@@ -11507,11 +11507,11 @@ index 0000000..7f9b1b0
 +		count++;
 +	}
 +}
-diff --git a/systray/tray.h b/systray/tray.h
+diff --git a/lib/lib/dwl/dwl/systray/tray.h b/lib/dwl/systray/tray.h
 new file mode 100644
 index 0000000..af4e5e3
 --- /dev/null
-+++ b/systray/tray.h
++++ b/lib/dwl/systray/tray.h
 @@ -0,0 +1,37 @@
 +#ifndef TRAY_H
 +#define TRAY_H
@@ -11550,11 +11550,11 @@ index 0000000..af4e5e3
 +void tray_rightclicked (Tray *tray, unsigned int index, const char **menucmd);
 +
 +#endif /* TRAY_H */
-diff --git a/systray/watcher.c b/systray/watcher.c
+diff --git a/lib/lib/dwl/dwl/systray/watcher.c b/lib/dwl/systray/watcher.c
 new file mode 100644
 index 0000000..8dd84b9
 --- /dev/null
-+++ b/systray/watcher.c
++++ b/lib/dwl/systray/watcher.c
 @@ -0,0 +1,551 @@
 +#include "watcher.h"
 +
@@ -12107,11 +12107,11 @@ index 0000000..8dd84b9
 +	wl_list_for_each(tray, &watcher->trays, link)
 +		tray_update(tray);
 +}
-diff --git a/systray/watcher.h b/systray/watcher.h
+diff --git a/lib/lib/dwl/dwl/systray/watcher.h b/lib/dwl/systray/watcher.h
 new file mode 100644
 index 0000000..127eb64
 --- /dev/null
-+++ b/systray/watcher.h
++++ b/lib/dwl/systray/watcher.h
 @@ -0,0 +1,35 @@
 +#ifndef WATCHER_H
 +#define WATCHER_H
@@ -12148,11 +12148,11 @@ index 0000000..127eb64
 +void watcher_update_trays (Watcher *watcher);
 +
 +#endif /* WATCHER_H */
-diff --git a/wallpaper.c b/wallpaper.c
+diff --git a/lib/lib/dwl/dwl/wallpaper.c b/lib/dwl/wallpaper.c
 new file mode 100644
 index 0000000..d785112
 --- /dev/null
-+++ b/wallpaper.c
++++ b/lib/dwl/wallpaper.c
 @@ -0,0 +1,440 @@
 +/* wallpaper.c - wallpaper slideshow support for dwl */
 +#define STB_IMAGE_IMPLEMENTATION
@@ -12594,11 +12594,11 @@ index 0000000..d785112
 +		load_random_image();
 +	}
 +}
-diff --git a/wallpaper.h b/wallpaper.h
+diff --git a/lib/lib/dwl/dwl/wallpaper.h b/lib/dwl/wallpaper.h
 new file mode 100644
 index 0000000..933827b
 --- /dev/null
-+++ b/wallpaper.h
++++ b/lib/dwl/wallpaper.h
 @@ -0,0 +1,41 @@
 +/* wallpaper.h - wallpaper slideshow support for dwl */
 +#ifndef WALLPAPER_H

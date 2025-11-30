@@ -3,4 +3,4 @@
 	url = https://github.com/wren-lang/wren
 [submodule "lib/dwl"]
 	path = lib/dwl
-	url = https://github.com/djpohly/dwl
+	url = https://codeberg.org/dwl/dwl.git

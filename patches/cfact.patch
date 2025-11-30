@@ -1,5 +1,5 @@
---- a/dwl.c
-+++ b/dwl.c
+--- a/lib/lib/dwl/dwl/dwl.c
++++ b/lib/dwl/dwl.c
 @@ -151,6 +151,7 @@ typedef struct {
  	unsigned int bw;
  	uint32_t tags;

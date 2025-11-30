@@ -1,5 +1,5 @@
---- a/dwl.c	2025-11-27 19:48:01.648895719 -0800
-+++ b/dwl.c	2025-11-27 19:48:25.185963284 -0800
+--- a/lib/lib/dwl/dwl/dwl.c	2025-11-27 19:48:01.648895719 -0800
++++ b/lib/dwl/dwl.c	2025-11-27 19:48:25.185963284 -0800
 @@ -344,6 +344,7 @@
  static void motionnotify(uint32_t time, struct wlr_input_device *device, double sx,
  		double sy, double sx_unaccel, double sy_unaccel);

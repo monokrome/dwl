@@ -5,7 +5,7 @@ BIN_DIR = bin
 SRC_DIR = src
 DWL_DIR = lib/dwl
 WREN_DIR = lib/wren
-PATCHES = patches/combined.patch patches/gradient.patch patches/cfact.patch patches/movestack.patch patches/float-xwayland.patch
+PATCHES = patches/combined.patch patches/gradient.patch patches/cfact.patch patches/movestack.patch
 SCRIPTING_PATCHES = patches/wren.patch
 HOSTNAME ?= $(shell hostname)
 MONITOR_CONFIG = monitors/$(HOSTNAME).h
@@ -30,7 +30,7 @@ patch: $(DWL_DIR)/.git
 	cd $(DWL_DIR) && git checkout . && git clean -fd
 	@for p in $(PATCHES); do \
 		echo "    Applying $$p..."; \
-		patch -d $(DWL_DIR) -p1 < $$p || exit 1; \
+		patch -p1 < $$p || exit 1; \
 	done
 	cp $(SRC_DIR)/config.h $(DWL_DIR)/config.h
 	@if [ -f "$(MONITOR_CONFIG)" ]; then \
@@ -41,7 +41,7 @@ patch: $(DWL_DIR)/.git
 # Apply wren scripting patch (after combined patch)
 patch-wren: $(WREN_DIR)/.git
 	@echo "    Applying $(SCRIPTING_PATCHES)..."
-	patch -d $(DWL_DIR) -p1 < $(SCRIPTING_PATCHES)
+	patch -p1 < $(SCRIPTING_PATCHES)
 
 # Copy wren scripting files to dwl directory
 copy-wren-files:
