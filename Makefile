@@ -5,7 +5,7 @@ BIN_DIR = bin
 SRC_DIR = src
 DWL_DIR = lib/dwl
 WREN_DIR = lib/wren
-PATCHES = patches/combined.patch patches/gradient.patch patches/cfact.patch patches/movestack.patch
+PATCHES = patches/combined.patch patches/cfact.patch patches/movestack.patch
 SCRIPTING_PATCHES = patches/wren.patch
 HOSTNAME ?= $(shell hostname)
 MONITOR_CONFIG = monitors/$(HOSTNAME).h
@@ -33,6 +33,14 @@ patch: $(DWL_DIR)/.git
 		patch -p1 < $$p || exit 1; \
 	done
 	cp $(SRC_DIR)/config.h $(DWL_DIR)/config.h
+	cp $(SRC_DIR)/wallpaper.c $(DWL_DIR)/wallpaper.c
+	cp $(SRC_DIR)/wallpaper.h $(DWL_DIR)/wallpaper.h
+	cp $(SRC_DIR)/stb_image.h $(DWL_DIR)/stb_image.h
+	cp $(SRC_DIR)/dbus.c $(DWL_DIR)/dbus.c
+	cp $(SRC_DIR)/dbus.h $(DWL_DIR)/dbus.h
+	cp $(SRC_DIR)/drwl.h $(DWL_DIR)/drwl.h
+	mkdir -p $(DWL_DIR)/systray
+	cp $(SRC_DIR)/systray/*.c $(SRC_DIR)/systray/*.h $(DWL_DIR)/systray/
 	@if [ -f "$(MONITOR_CONFIG)" ]; then \
 		mkdir -p $(DWL_DIR)/monitors; \
 		cp $(MONITOR_CONFIG) $(DWL_DIR)/monitors/; \

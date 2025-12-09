@@ -15,13 +15,16 @@ enum {
 
 /* Initialize wallpaper system */
 void wallpaper_init(struct wlr_scene *scene, struct wlr_renderer *renderer,
-		const char *dir, int interval, int scale_mode);
+		const char *dir, int interval);
 
 /* Clean up wallpaper resources */
 void wallpaper_cleanup(void);
 
 /* Load next random image in current directory */
 void wallpaper_next_image(void);
+
+/* Load previous image in current directory */
+void wallpaper_prev_image(void);
 
 /* Switch to a random directory and load random image from it */
 void wallpaper_next_dir(void);
@@ -37,5 +40,14 @@ void wallpaper_set_event_loop(struct wl_event_loop *loop);
 
 /* Resize wallpaper to fit output dimensions */
 void wallpaper_resize(int width, int height);
+
+/* Disable wallpaper (hide scene buffer) */
+void wallpaper_disable(void);
+
+/* Enable wallpaper (show scene buffer) */
+void wallpaper_enable(void);
+
+/* Check if wallpaper is enabled */
+int wallpaper_is_enabled(void);
 
 #endif /* WALLPAPER_H */

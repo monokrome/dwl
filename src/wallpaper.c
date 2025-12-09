@@ -18,6 +18,20 @@
 
 #include "wallpaper.h"
 
+#include <math.h>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+/* Fallback gradient colors - dark metallic pastel purples */
+#define GRADIENT_COLOR1_R 0x2D
+#define GRADIENT_COLOR1_G 0x1F
+#define GRADIENT_COLOR1_B 0x3D
+#define GRADIENT_COLOR2_R 0x4A
+#define GRADIENT_COLOR2_G 0x3B
+#define GRADIENT_COLOR2_B 0x5C
+#define GRADIENT_ANGLE 33.0 /* degrees */
+
 #define MAX_PATH 4096
 
 /* Scaling modes */
@@ -57,6 +71,7 @@ static struct {
 
 /* Forward declarations */
 static void load_random_image(void);
+static void load_gradient_fallback(void);
 static void read_scale_mode(const char *dir_path);
 static char *expand_path(const char *path);
 static char *pick_random_subdir(const char *path);
@@ -341,14 +356,91 @@ static void load_image_file(const char *path) {
 	strncpy(wp.current_file, path, MAX_PATH - 1);
 }
 
+static void load_gradient_fallback(void) {
+	unsigned char *data;
+	size_t stride;
+	double angle_rad, cos_a, sin_a;
+	double max_proj;
+	int x, y;
+	WallpaperBuffer *buffer;
+
+	if (wp.width == 0 || wp.height == 0)
+		return;
+
+	stride = wp.width * 4;
+	data = calloc(1, stride * wp.height);
+	if (!data)
+		return;
+
+	/* Convert angle to radians */
+	angle_rad = GRADIENT_ANGLE * M_PI / 180.0;
+	cos_a = cos(angle_rad);
+	sin_a = sin(angle_rad);
+
+	/* Calculate max projection for normalization */
+	max_proj = fabs(wp.width * cos_a) + fabs(wp.height * sin_a);
+
+	for (y = 0; y < wp.height; y++) {
+		for (x = 0; x < wp.width; x++) {
+			double proj, t;
+			unsigned char r, g, b, *pixel;
+
+			/* Project point onto gradient axis */
+			proj = x * cos_a + y * sin_a;
+			t = (proj + max_proj / 2.0) / max_proj;
+
+			/* Clamp t to [0, 1] */
+			if (t < 0.0) t = 0.0;
+			if (t > 1.0) t = 1.0;
+
+			/* Interpolate colors */
+			r = (unsigned char)(GRADIENT_COLOR1_R + t * (GRADIENT_COLOR2_R - GRADIENT_COLOR1_R));
+			g = (unsigned char)(GRADIENT_COLOR1_G + t * (GRADIENT_COLOR2_G - GRADIENT_COLOR1_G));
+			b = (unsigned char)(GRADIENT_COLOR1_B + t * (GRADIENT_COLOR2_B - GRADIENT_COLOR1_B));
+
+			/* BGRA format */
+			pixel = data + (y * wp.width + x) * 4;
+			pixel[0] = b;
+			pixel[1] = g;
+			pixel[2] = r;
+			pixel[3] = 0xFF;
+		}
+	}
+
+	/* Create new buffer */
+	buffer = calloc(1, sizeof(WallpaperBuffer));
+	if (!buffer) {
+		free(data);
+		return;
+	}
+
+	wlr_buffer_init(&buffer->base, &buffer_impl, wp.width, wp.height);
+	buffer->data = data;
+	buffer->format = DRM_FORMAT_ARGB8888;
+	buffer->stride = stride;
+
+	/* Update scene buffer */
+	if (wp.scene_buffer) {
+		wlr_scene_buffer_set_buffer(wp.scene_buffer, &buffer->base);
+		wlr_scene_buffer_set_dest_size(wp.scene_buffer, wp.width, wp.height);
+	}
+
+	/* Release old buffer */
+	if (wp.buffer)
+		wlr_buffer_drop(&wp.buffer->base);
+	wp.buffer = buffer;
+}
+
 static void load_random_image(void) {
 	char *subdir, *image;
 
 	/* If we don't have a current directory, pick one */
 	if (wp.current_dir[0] == '\0') {
 		subdir = pick_random_subdir(wp.base_path);
-		if (!subdir)
+		if (!subdir) {
+			load_gradient_fallback();
 			return;
+		}
 		strncpy(wp.current_dir, subdir, MAX_PATH - 1);
 		free(subdir);
 		read_scale_mode(wp.current_dir);
@@ -369,11 +461,13 @@ static void load_random_image(void) {
 	if (image) {
 		load_image_file(image);
 		free(image);
+	} else {
+		load_gradient_fallback();
 	}
 }
 
 void wallpaper_init(struct wlr_scene *scene, struct wlr_renderer *renderer,
-		const char *dir, int interval, int scale_mode) {
+		const char *dir, int interval) {
 	char *expanded;
 
 	srand(time(NULL));
@@ -382,7 +476,7 @@ void wallpaper_init(struct wlr_scene *scene, struct wlr_renderer *renderer,
 	wp.scene = scene;
 	wp.renderer = renderer;
 	wp.interval = interval;
-	wp.scale_mode = scale_mode;
+	wp.scale_mode = SCALE_COVER;
 
 	expanded = expand_path(dir);
 	if (!expanded) {
@@ -431,6 +525,11 @@ void wallpaper_next_image(void) {
 	load_random_image();
 }
 
+void wallpaper_prev_image(void) {
+	/* With random selection, prev just loads another random image */
+	load_random_image();
+}
+
 void wallpaper_next_dir(void) {
 	char *subdir = pick_random_subdir(wp.base_path);
 	if (subdir) {
@@ -470,4 +569,18 @@ void wallpaper_resize(int width, int height) {
 	} else {
 		load_random_image();
 	}
+}
+
+void wallpaper_disable(void) {
+	if (wp.scene_buffer)
+		wlr_scene_node_set_enabled(&wp.scene_buffer->node, false);
+}
+
+void wallpaper_enable(void) {
+	if (wp.scene_buffer)
+		wlr_scene_node_set_enabled(&wp.scene_buffer->node, true);
+}
+
+int wallpaper_is_enabled(void) {
+	return wp.scene_buffer && wp.scene_buffer->node.enabled;
 }
