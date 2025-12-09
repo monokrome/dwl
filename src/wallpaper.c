@@ -57,6 +57,7 @@ static struct {
 
 /* Forward declarations */
 static void load_random_image(void);
+static void read_scale_mode(const char *dir_path);
 static char *expand_path(const char *path);
 static char *pick_random_subdir(const char *path);
 static char *pick_random_image(const char *dir_path);
@@ -212,6 +213,35 @@ static char *pick_random_image(const char *dir_path) {
 	return result;
 }
 
+static void read_scale_mode(const char *dir_path) {
+	char path[MAX_PATH];
+	FILE *f;
+	char buf[32];
+	size_t len;
+
+	snprintf(path, sizeof(path), "%s/.scaling", dir_path);
+	f = fopen(path, "r");
+	if (!f)
+		return;
+
+	if (fgets(buf, sizeof(buf), f)) {
+		len = strlen(buf);
+		if (len > 0 && buf[len - 1] == '\n')
+			buf[len - 1] = '\0';
+
+		if (strcasecmp(buf, "tile") == 0)
+			wp.scale_mode = SCALE_TILE;
+		else if (strcasecmp(buf, "center") == 0)
+			wp.scale_mode = SCALE_CENTER;
+		else if (strcasecmp(buf, "fit") == 0)
+			wp.scale_mode = SCALE_FIT;
+		else if (strcasecmp(buf, "cover") == 0)
+			wp.scale_mode = SCALE_COVER;
+	}
+
+	fclose(f);
+}
+
 static void load_image_file(const char *path) {
 	int img_w, img_h, channels;
 	unsigned char *img_data, *final_data;
@@ -321,6 +351,7 @@ static void load_random_image(void) {
 			return;
 		strncpy(wp.current_dir, subdir, MAX_PATH - 1);
 		free(subdir);
+		read_scale_mode(wp.current_dir);
 	}
 
 	image = pick_random_image(wp.current_dir);
@@ -330,6 +361,7 @@ static void load_random_image(void) {
 		if (subdir) {
 			strncpy(wp.current_dir, subdir, MAX_PATH - 1);
 			free(subdir);
+			read_scale_mode(wp.current_dir);
 			image = pick_random_image(wp.current_dir);
 		}
 	}
@@ -404,6 +436,7 @@ void wallpaper_next_dir(void) {
 	if (subdir) {
 		strncpy(wp.current_dir, subdir, MAX_PATH - 1);
 		free(subdir);
+		read_scale_mode(wp.current_dir);
 		load_random_image();
 		fprintf(stderr, "wallpaper: switched to %s\n", wp.current_dir);
 	}
