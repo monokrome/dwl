@@ -8,13 +8,78 @@
 #include "wlr-attached-surface-unstable-v1-protocol.h"
 
 static struct wl_global *manager_global = NULL;
-static struct wlr_scene *attached_scene = NULL;
 static struct wl_list attached_surfaces;
 static uint32_t serial_counter = 0;
 
 static void attached_surface_destroy(AttachedSurface *as);
 
 /* --- Attached Surface Implementation --- */
+
+/* Calculate position based on anchor, parent geometry, and surface size */
+static void calculate_anchored_position(AttachedSurface *as, int32_t *out_x, int32_t *out_y)
+{
+	int32_t x = 0, y = 0;
+	int32_t parent_width, parent_height;
+
+	if (!as->parent || as->anchor == ATTACHED_ANCHOR_NONE) {
+		*out_x = as->x;
+		*out_y = as->y;
+		return;
+	}
+
+	/* Get parent geometry from toplevel current state */
+	parent_width = as->parent->current.width;
+	parent_height = as->parent->current.height;
+
+	switch (as->anchor) {
+	case ATTACHED_ANCHOR_RIGHT:
+		x = parent_width + as->anchor_margin;
+		y = as->anchor_offset;
+		break;
+	case ATTACHED_ANCHOR_LEFT:
+		x = -(int32_t)as->width - as->anchor_margin;
+		y = as->anchor_offset;
+		break;
+	case ATTACHED_ANCHOR_TOP:
+		x = as->anchor_offset;
+		y = -(int32_t)as->height - as->anchor_margin;
+		break;
+	case ATTACHED_ANCHOR_BOTTOM:
+		x = as->anchor_offset;
+		y = parent_height + as->anchor_margin;
+		break;
+	default:
+		x = as->x;
+		y = as->y;
+		break;
+	}
+
+	*out_x = x;
+	*out_y = y;
+}
+
+static void handle_set_anchor(struct wl_client *client,
+		struct wl_resource *resource, uint32_t anchor, int32_t margin, int32_t offset)
+{
+	AttachedSurface *as = wl_resource_get_user_data(resource);
+	if (!as) return;
+
+	as->pending_anchor = (enum AttachedSurfaceAnchor)anchor;
+	as->pending_anchor_margin = margin;
+	as->pending_anchor_offset = offset;
+
+	/* Apply immediately if already mapped */
+	if (as->mapped && as->scene) {
+		int32_t x, y;
+		as->anchor = as->pending_anchor;
+		as->anchor_margin = as->pending_anchor_margin;
+		as->anchor_offset = as->pending_anchor_offset;
+		calculate_anchored_position(as, &x, &y);
+		as->x = x;
+		as->y = y;
+		wlr_scene_node_set_position(&as->scene->node, x, y);
+	}
+}
 
 static void handle_set_position(struct wl_client *client,
 		struct wl_resource *resource, int32_t x, int32_t y)
@@ -23,6 +88,13 @@ static void handle_set_position(struct wl_client *client,
 	if (!as) return;
 	as->pending_x = x;
 	as->pending_y = y;
+
+	/* Apply position immediately if already mapped and not anchored */
+	if (as->mapped && as->scene && as->anchor == ATTACHED_ANCHOR_NONE) {
+		as->x = x;
+		as->y = y;
+		wlr_scene_node_set_position(&as->scene->node, x, y);
+	}
 }
 
 static void handle_set_size(struct wl_client *client,
@@ -51,6 +123,7 @@ static void handle_surface_destroy(struct wl_client *client,
 }
 
 static const struct zwlr_attached_surface_v1_interface attached_surface_impl = {
+	.set_anchor = handle_set_anchor,
 	.set_position = handle_set_position,
 	.set_size = handle_set_size,
 	.ack_configure = handle_ack_configure,
@@ -68,8 +141,7 @@ static void attached_surface_resource_destroy(struct wl_resource *resource)
 static void handle_surface_commit(struct wl_listener *listener, void *data)
 {
 	AttachedSurface *as = wl_container_of(listener, as, surface_commit);
-	struct wlr_scene_tree *parent_tree;
-	int parent_x, parent_y;
+	int32_t x, y;
 
 	if (!as->configured) {
 		return;
@@ -80,19 +152,18 @@ static void handle_surface_commit(struct wl_listener *listener, void *data)
 	as->y = as->pending_y;
 	as->width = as->pending_width;
 	as->height = as->pending_height;
+	as->anchor = as->pending_anchor;
+	as->anchor_margin = as->pending_anchor_margin;
+	as->anchor_offset = as->pending_anchor_offset;
 
-	/* Update scene node position relative to parent */
-	if (as->parent && as->scene) {
-		parent_tree = as->parent->base->surface->data;
-		parent_x = 0;
-		parent_y = 0;
+	/* Calculate position (anchored or manual) */
+	calculate_anchored_position(as, &x, &y);
+	as->x = x;
+	as->y = y;
 
-		/* Get parent's position in scene coordinates */
-		if (parent_tree) {
-			wlr_scene_node_coords(&parent_tree->node, &parent_x, &parent_y);
-		}
-
-		wlr_scene_node_set_position(&as->scene->node, parent_x + as->x, parent_y + as->y);
+	/* Update scene node position relative to parent (scene is already parented) */
+	if (as->scene) {
+		wlr_scene_node_set_position(&as->scene->node, as->x, as->y);
 		wlr_scene_node_set_enabled(&as->scene->node, 1);
 		as->mapped = 1;
 	}
@@ -111,7 +182,9 @@ static void handle_parent_destroy(struct wl_listener *listener, void *data)
 	/* Send closed event to client */
 	zwlr_attached_surface_v1_send_closed(as->resource);
 
-	/* Clean up */
+	/* Scene node is a child of parent's tree, so it's already being destroyed.
+	 * Set to NULL so we don't try to destroy it again in attached_surface_destroy. */
+	as->scene = NULL;
 	as->parent = NULL;
 	wl_list_remove(&as->parent_destroy.link);
 	wl_list_init(&as->parent_destroy.link);
@@ -184,8 +257,17 @@ static void manager_handle_get_attached_surface(struct wl_client *client,
 	as->surface = surface;
 	as->parent = parent;
 
-	/* Create scene tree for this surface */
-	as->scene = wlr_scene_subsurface_tree_create(&attached_scene->tree, surface);
+	/* Create scene tree as child of parent's scene tree so it moves with parent */
+	struct wlr_scene_tree *parent_tree = parent->base->surface->data;
+	if (!parent_tree) {
+		wl_resource_post_error(resource,
+			ZWLR_ATTACHED_SURFACE_MANAGER_V1_ERROR_INVALID_PARENT,
+			"parent has no scene tree");
+		free(as);
+		return;
+	}
+
+	as->scene = wlr_scene_subsurface_tree_create(parent_tree, surface);
 	if (!as->scene) {
 		wl_resource_destroy(as->resource);
 		free(as);
@@ -241,8 +323,8 @@ static void manager_bind(struct wl_client *client, void *data,
 
 void attached_surface_init(struct wl_display *display, struct wlr_scene *scene)
 {
+	(void)scene; /* No longer needed - surfaces parent to their toplevel's scene tree */
 	wl_list_init(&attached_surfaces);
-	attached_scene = scene;
 
 	manager_global = wl_global_create(display,
 		&zwlr_attached_surface_manager_v1_interface, 1, NULL, manager_bind);
@@ -264,19 +346,19 @@ void attached_surface_finish(void)
 void attached_surface_update_positions(void)
 {
 	AttachedSurface *as;
-	struct wlr_scene_tree *parent_tree;
-	int parent_x, parent_y;
+	int32_t x, y;
 
+	/* Recalculate positions for anchored surfaces when parent resizes */
 	wl_list_for_each(as, &attached_surfaces, link) {
-		if (!as->mapped || !as->parent || !as->scene) continue;
+		if (!as->mapped || !as->scene || as->anchor == ATTACHED_ANCHOR_NONE)
+			continue;
 
-		parent_tree = as->parent->base->surface->data;
-		if (!parent_tree) continue;
-
-		parent_x = 0;
-		parent_y = 0;
-		wlr_scene_node_coords(&parent_tree->node, &parent_x, &parent_y);
-		wlr_scene_node_set_position(&as->scene->node, parent_x + as->x, parent_y + as->y);
+		calculate_anchored_position(as, &x, &y);
+		if (x != as->x || y != as->y) {
+			as->x = x;
+			as->y = y;
+			wlr_scene_node_set_position(&as->scene->node, x, y);
+		}
 	}
 }
 

@@ -60,7 +60,7 @@ copy-extras-files:
 	cp $(SRC_DIR)/scripting.h $(DWL_DIR)/
 	cp $(SRC_DIR)/attached_surface.c $(DWL_DIR)/attached_surface.c
 	cp $(SRC_DIR)/attached_surface.h $(DWL_DIR)/attached_surface.h
-	cp $(ATTACHED_SURFACE_DIR)/wlr-attached-surface-unstable-v1.xml $(DWL_DIR)/protocols/
+	sed 's/ interface="xdg_toplevel"//' $(ATTACHED_SURFACE_DIR)/wlr-attached-surface-unstable-v1.xml > $(DWL_DIR)/protocols/wlr-attached-surface-unstable-v1.xml
 
 # Build dwl (standard)
 build:

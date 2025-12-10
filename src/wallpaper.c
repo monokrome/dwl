@@ -78,6 +78,7 @@ static struct {
 #ifdef EXTRAS
 	/* Shader state */
 	int is_shader;
+	int shaders_allowed; /* Only allow shaders after first successful render */
 	GLuint shader_program;
 	GLuint vbo;
 	GLuint fbo;
@@ -198,6 +199,10 @@ static char *pick_random_subdir(const char *path) {
 		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
 
 		if (is_directory(full_path)) {
+			/* Skip current directory unless it's the only one */
+			if (strcmp(full_path, wp.current_dir) == 0)
+				continue;
+
 			if (count >= capacity) {
 				capacity = capacity ? capacity * 2 : 16;
 				dirs = realloc(dirs, capacity * sizeof(char *));
@@ -206,6 +211,11 @@ static char *pick_random_subdir(const char *path) {
 		}
 	}
 	closedir(dir);
+
+	/* If no other dirs found, fall back to current */
+	if (count == 0 && wp.current_dir[0] != '\0') {
+		return strdup(wp.current_dir);
+	}
 
 	if (count > 0) {
 		int idx = rand() % count;
@@ -243,6 +253,11 @@ static char *pick_random_image(const char *dir_path) {
 
 		if (is_image_file(entry->d_name)) {
 			snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+
+			/* Skip current image unless it's the only one */
+			if (strcmp(full_path, wp.current_file) == 0)
+				continue;
+
 			if (count >= capacity) {
 				capacity = capacity ? capacity * 2 : 16;
 				images = realloc(images, capacity * sizeof(char *));
@@ -251,6 +266,13 @@ static char *pick_random_image(const char *dir_path) {
 		}
 	}
 	closedir(dir);
+
+	/* If no other images found, fall back to current only if it's in this directory */
+	if (count == 0 && wp.current_file[0] != '\0') {
+		if (strncmp(wp.current_file, dir_path, strlen(dir_path)) == 0) {
+			return strdup(wp.current_file);
+		}
+	}
 
 	if (count > 0) {
 		int idx = rand() % count;
@@ -588,6 +610,11 @@ static char *pick_random_shader(const char *dir_path) {
 
 		if (is_shader_file(entry->d_name)) {
 			snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+
+			/* Skip current shader unless it's the only one */
+			if (strcmp(full_path, wp.current_file) == 0)
+				continue;
+
 			if (count >= capacity) {
 				capacity = capacity ? capacity * 2 : 16;
 				shaders = realloc(shaders, capacity * sizeof(char *));
@@ -596,6 +623,14 @@ static char *pick_random_shader(const char *dir_path) {
 		}
 	}
 	closedir(dir);
+
+	/* If no other shaders found, fall back to current only if it's in this directory */
+	if (count == 0 && wp.current_file[0] != '\0' && is_shader_file(wp.current_file)) {
+		/* Check if current_file is in dir_path */
+		if (strncmp(wp.current_file, dir_path, strlen(dir_path)) == 0) {
+			return strdup(wp.current_file);
+		}
+	}
 
 	if (count > 0) {
 		int idx = rand() % count;
@@ -621,10 +656,8 @@ static void cleanup_shader(void) {
 	EGLSurface prev_draw, prev_read;
 	int have_gl_resources;
 
-	if (wp.shader_timer) {
-		wl_event_source_remove(wp.shader_timer);
-		wp.shader_timer = NULL;
-	}
+	/* Note: Don't destroy shader_timer here - it's a persistent resource.
+	 * Only wallpaper_cleanup() should remove the timer. */
 
 	/* Check if we have GL resources to clean up */
 	have_gl_resources = wp.shader_program || wp.vbo || wp.fbo || wp.render_texture;
@@ -710,9 +743,6 @@ static int load_shader_file(const char *path) {
 	prev_draw = eglGetCurrentSurface(EGL_DRAW);
 	prev_read = eglGetCurrentSurface(EGL_READ);
 
-	fprintf(stderr, "wallpaper: load_shader_file - prev_context=%p, prev_draw=%p, prev_read=%p\n",
-		(void*)prev_context, (void*)prev_draw, (void*)prev_read);
-
 	/* Make EGL context current */
 	if (!eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context)) {
 		fprintf(stderr, "wallpaper: failed to make EGL context current\n");
@@ -767,6 +797,7 @@ static int load_shader_file(const char *path) {
 	glGenBuffers(1, &wp.vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, wp.vbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0); /* Unbind - wlroots expects clean state */
 
 	/* Create FBO and texture for offscreen rendering */
 	glGenFramebuffers(1, &wp.fbo);
@@ -777,15 +808,9 @@ static int load_shader_file(const char *path) {
 	strncpy(wp.current_file, path, MAX_PATH - 1);
 
 	/* Restore previous EGL state */
-	fprintf(stderr, "wallpaper: restoring EGL state - prev_context=%p, prev_draw=%p, prev_read=%p\n",
-		(void*)prev_context, (void*)prev_draw, (void*)prev_read);
 	if (!eglMakeCurrent(display, prev_draw, prev_read, prev_context)) {
-		fprintf(stderr, "wallpaper: WARNING - failed to restore EGL context! error=0x%x\n", eglGetError());
+		fprintf(stderr, "wallpaper: failed to restore EGL context\n");
 	}
-
-	fprintf(stderr, "wallpaper: loaded shader %s\n", path);
-
-	/* Animation disabled for now - render single frame on resize */
 
 	return 1;
 }
@@ -807,7 +832,8 @@ static void render_shader_frame(void) {
 
 	/* Get EGL context */
 	egl = wlr_gles2_renderer_get_egl(wp.renderer);
-	if (!egl) return;
+	if (!egl)
+		return;
 
 	display = wlr_egl_get_display(egl);
 	context = wlr_egl_get_context(egl);
@@ -831,12 +857,15 @@ static void render_shader_frame(void) {
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, wp.render_texture, 0);
 
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-		fprintf(stderr, "wallpaper: framebuffer incomplete\n");
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		return;
 	}
 
 	glViewport(0, 0, wp.width, wp.height);
+
+	/* Clear FBO before drawing */
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
 
 	/* Run shader */
 	glUseProgram(wp.shader_program);
@@ -854,6 +883,8 @@ static void render_shader_frame(void) {
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
 	glDisableVertexAttribArray(pos_attrib);
+	glBindBuffer(GL_ARRAY_BUFFER, 0); /* Clean up state */
+	glUseProgram(0);
 
 	/* Read pixels into CPU buffer */
 	stride = wp.width * 4;
@@ -951,11 +982,15 @@ static void load_random_image(void) {
 	if (shader) {
 		if (load_shader_file(shader)) {
 			free(shader);
+			load_gradient_fallback();
+			/* Start shader animation timer */
+			if (wp.shader_timer) {
+				wl_event_source_timer_update(wp.shader_timer, 1);
+			}
 			return;
 		}
 		free(shader);
 	}
-	/* Clean up any shader state if we're loading an image */
 	cleanup_shader();
 #endif
 
@@ -968,15 +1003,18 @@ static void load_random_image(void) {
 			free(subdir);
 			read_scale_mode(wp.current_dir);
 #ifdef EXTRAS
-			/* Try shaders in new dir */
-			shader = pick_random_shader(wp.current_dir);
-			if (shader) {
-				if (load_shader_file(shader)) {
+			/* DISABLED: shader loading causes compositor to freeze
+			if (wp.shaders_allowed) {
+				shader = pick_random_shader(wp.current_dir);
+				if (shader) {
+					if (load_shader_file(shader)) {
+						free(shader);
+						return;
+					}
 					free(shader);
-					return;
 				}
-				free(shader);
 			}
+			*/
 #endif
 			image = pick_random_image(wp.current_dir);
 		}
@@ -1041,10 +1079,25 @@ void wallpaper_set_event_loop(struct wl_event_loop *loop) {
 			wl_event_source_timer_update(wp.timer, wp.interval * 1000);
 		}
 	}
+
+#ifdef EXTRAS
+	/* Create shader animation timer (starts inactive) */
+	if (loop) {
+		wp.shader_timer = wl_event_loop_add_timer(loop, shader_frame_callback, NULL);
+		/* If shader was loaded during init but couldn't render, trigger it now */
+		if (wp.is_shader && wp.shader_timer && wp.width > 0 && wp.height > 0) {
+			wl_event_source_timer_update(wp.shader_timer, 1);
+		}
+	}
+#endif
 }
 
 void wallpaper_cleanup(void) {
 #ifdef EXTRAS
+	if (wp.shader_timer) {
+		wl_event_source_remove(wp.shader_timer);
+		wp.shader_timer = NULL;
+	}
 	cleanup_shader();
 #endif
 
@@ -1075,7 +1128,6 @@ void wallpaper_next_dir(void) {
 		free(subdir);
 		read_scale_mode(wp.current_dir);
 		load_random_image();
-		fprintf(stderr, "wallpaper: switched to %s\n", wp.current_dir);
 	}
 }
 
@@ -1102,9 +1154,13 @@ void wallpaper_resize(int width, int height) {
 	wp.height = height;
 
 #ifdef EXTRAS
-	/* If shader is active, just render a new frame at new size */
+	/* If shader is active, schedule a render via timer instead of rendering immediately.
+	 * Direct render from updatemons() causes freeze - wlroots EGL state conflict. */
 	if (wp.is_shader) {
-		render_shader_frame();
+		if (wp.shader_timer) {
+			wl_event_source_timer_update(wp.shader_timer, 1); /* Render in 1ms */
+		}
+		/* If no timer yet, it will render once event loop is ready */
 		return;
 	}
 #endif

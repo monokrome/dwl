@@ -49,7 +49,15 @@ diff --git a/lib/dwl/dwl.c b/lib/dwl/dwl.c
 
  /* macros */
  #define MAX(A, B)               ((A) > (B) ? (A) : (B))
-@@ -903,6 +904,7 @@ cleanup(void)
+@@ -610,6 +611,7 @@ arrange(Monitor *m)
+ 		m->lt[m->sellt]->arrange(m);
+ 	motionnotify(0, NULL, 0, 0, 0, 0);
+ 	checkidleinhibitor(NULL);
++	attached_surface_update_positions();
+ }
+
+ void
+@@ -903,6 +905,7 @@ cleanup(void)
  #ifdef XWAYLAND
  	wlr_xwayland_destroy(xwayland);
  #endif
@@ -57,7 +65,15 @@ diff --git a/lib/dwl/dwl.c b/lib/dwl/dwl.c
  	wl_display_destroy_clients(dpy);
  	if (googledrive_watch)
  		g_object_unref(googledrive_watch);
-@@ -2954,6 +2956,9 @@ setup(void)
+@@ -1109,6 +1112,7 @@ commitnotify(struct wl_listener *listener, void *data)
+ 	}
+
+ 	resize(c, c->geom, (c->isfloating && !c->isfullscreen));
++	attached_surface_update_positions();
+
+ 	/* mark a pending resize as completed */
+ 	if (c->resize && c->resize <= c->surface.xdg->current.configure_serial)
+@@ -2954,6 +2958,9 @@ setup(void)
  	layer_shell = wlr_layer_shell_v1_create(dpy, 3);
  	wl_signal_add(&layer_shell->events.new_surface, &new_layer_surface);
 
