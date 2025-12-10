@@ -38,6 +38,7 @@ static const Rule rules[] = {
 	/* app_id             title       tags mask     isfloating   monitor */
 	{ "steam",            NULL,       0,            1,           -1 }, /* Steam breaks when tiled */
 	{ "Steam",            NULL,       0,            1,           -1 },
+	{ "mkfm",             NULL,       0,            1,           -1 },
 };
 
 /* layout(s) */
@@ -130,8 +131,8 @@ static const enum libinput_config_tap_button_map button_map = LIBINPUT_CONFIG_TA
 
 /* commands */
 static const char *termcmd[] = { "kitty", NULL };
-static const char *menucmd[] = { "rofi", "-show", "run", NULL };
-static const char *dmenucmd[] = { "rofi", "-dmenu", NULL };
+static const char *menucmd[] = { "wofi", "-show", "run", NULL };
+static const char *dmenucmd[] = { "wofi", "-dmenu", NULL };
 
 static const Key keys[] = {
 	/* Note that Shift changes certain key codes: c -> C, 2 -> at, etc. */

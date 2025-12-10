@@ -6,17 +6,17 @@ SRC_DIR = src
 DWL_DIR = lib/dwl
 WREN_DIR = lib/wren
 PATCHES = patches/combined.patch patches/cfact.patch patches/movestack.patch
-SCRIPTING_PATCHES = patches/wren.patch
+EXTRAS_PATCHES = patches/extras.patch
 HOSTNAME ?= $(shell hostname)
 MONITOR_CONFIG = monitors/$(HOSTNAME).h
 
-.PHONY: all wren build clean unpatch install uninstall
+.PHONY: all extras build clean unpatch install uninstall
 
-# Default: build without wren scripting
+# Default: build without extras
 all: patch build copy
 
-# Build with wren scripting support
-wren: patch patch-wren copy-wren-files build-wren copy
+# Build with extras: Wren scripting + GLSL shader wallpapers
+extras: patch patch-extras copy-extras-files build-extras copy
 
 # Initialize submodules if needed
 $(DWL_DIR)/.git:
@@ -46,13 +46,13 @@ patch: $(DWL_DIR)/.git
 		cp $(MONITOR_CONFIG) $(DWL_DIR)/monitors/; \
 	fi
 
-# Apply wren scripting patch (after combined patch)
-patch-wren: $(WREN_DIR)/.git
-	@echo "    Applying $(SCRIPTING_PATCHES)..."
-	patch -p1 < $(SCRIPTING_PATCHES)
+# Apply extras patch (after combined patch)
+patch-extras: $(WREN_DIR)/.git
+	@echo "    Applying $(EXTRAS_PATCHES)..."
+	patch -p1 < $(EXTRAS_PATCHES)
 
-# Copy wren scripting files to dwl directory
-copy-wren-files:
+# Copy extras files to dwl directory
+copy-extras-files:
 	cp $(SRC_DIR)/scripting.c $(DWL_DIR)/
 	cp $(SRC_DIR)/scripting.h $(DWL_DIR)/
 
@@ -60,9 +60,9 @@ copy-wren-files:
 build:
 	$(MAKE) -C $(DWL_DIR)
 
-# Build dwl with wren scripting
-build-wren:
-	$(MAKE) -C $(DWL_DIR) scripting
+# Build dwl with extras
+build-extras:
+	$(MAKE) -C $(DWL_DIR) extras
 
 # Copy built binary to bin/
 copy:

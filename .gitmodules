@@ -4,3 +4,6 @@
 [submodule "lib/dwl"]
 	path = lib/dwl
 	url = https://codeberg.org/dwl/dwl.git
+[submodule "lib/wlr-attached-surface"]
+	path = lib/wlr-attached-surface
+	url = https://github.com/monokrome/wlr-attached-surface
