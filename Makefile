@@ -7,7 +7,7 @@ DWL_DIR = lib/dwl
 WREN_DIR = lib/wren
 ATTACHED_SURFACE_DIR = lib/wlr-attached-surface
 PATCHES = patches/combined.patch patches/cfact.patch patches/movestack.patch
-EXTRAS_PATCHES = patches/extras.patch patches/attached-surface.patch
+EXTRAS_PATCHES = patches/extras.patch patches/attached-surface.patch patches/cfact-x11.patch
 HOSTNAME ?= $(shell hostname)
 MONITOR_CONFIG = monitors/$(HOSTNAME).h
 

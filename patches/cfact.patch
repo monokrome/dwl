@@ -1,4 +1,4 @@
---- a/lib/lib/dwl/dwl/dwl.c
+--- a/lib/dwl/dwl.c
 +++ b/lib/dwl/dwl.c
 @@ -151,6 +151,7 @@ typedef struct {
  	unsigned int bw;
