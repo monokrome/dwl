@@ -677,6 +677,8 @@ static int load_shader_file(const char *path) {
 	struct wlr_egl *egl;
 	EGLDisplay display;
 	EGLContext context;
+	EGLContext prev_context;
+	EGLSurface prev_draw, prev_read;
 	static const float vertices[] = {
 		-1.0f, -1.0f,
 		 1.0f, -1.0f,
@@ -702,6 +704,14 @@ static int load_shader_file(const char *path) {
 
 	display = wlr_egl_get_display(egl);
 	context = wlr_egl_get_context(egl);
+
+	/* Save current EGL state */
+	prev_context = eglGetCurrentContext();
+	prev_draw = eglGetCurrentSurface(EGL_DRAW);
+	prev_read = eglGetCurrentSurface(EGL_READ);
+
+	fprintf(stderr, "wallpaper: load_shader_file - prev_context=%p, prev_draw=%p, prev_read=%p\n",
+		(void*)prev_context, (void*)prev_draw, (void*)prev_read);
 
 	/* Make EGL context current */
 	if (!eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context)) {
@@ -765,6 +775,13 @@ static int load_shader_file(const char *path) {
 	wp.is_shader = 1;
 	wp.shader_time = 0.0f;
 	strncpy(wp.current_file, path, MAX_PATH - 1);
+
+	/* Restore previous EGL state */
+	fprintf(stderr, "wallpaper: restoring EGL state - prev_context=%p, prev_draw=%p, prev_read=%p\n",
+		(void*)prev_context, (void*)prev_draw, (void*)prev_read);
+	if (!eglMakeCurrent(display, prev_draw, prev_read, prev_context)) {
+		fprintf(stderr, "wallpaper: WARNING - failed to restore EGL context! error=0x%x\n", eglGetError());
+	}
 
 	fprintf(stderr, "wallpaper: loaded shader %s\n", path);
 

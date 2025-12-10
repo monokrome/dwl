@@ -5,8 +5,9 @@ BIN_DIR = bin
 SRC_DIR = src
 DWL_DIR = lib/dwl
 WREN_DIR = lib/wren
+ATTACHED_SURFACE_DIR = lib/wlr-attached-surface
 PATCHES = patches/combined.patch patches/cfact.patch patches/movestack.patch
-EXTRAS_PATCHES = patches/extras.patch
+EXTRAS_PATCHES = patches/extras.patch patches/attached-surface.patch
 HOSTNAME ?= $(shell hostname)
 MONITOR_CONFIG = monitors/$(HOSTNAME).h
 
@@ -46,15 +47,20 @@ patch: $(DWL_DIR)/.git
 		cp $(MONITOR_CONFIG) $(DWL_DIR)/monitors/; \
 	fi
 
-# Apply extras patch (after combined patch)
+# Apply extras patches (after combined patch)
 patch-extras: $(WREN_DIR)/.git
-	@echo "    Applying $(EXTRAS_PATCHES)..."
-	patch -p1 < $(EXTRAS_PATCHES)
+	@for p in $(EXTRAS_PATCHES); do \
+		echo "    Applying $$p..."; \
+		patch -p1 < $$p || exit 1; \
+	done
 
 # Copy extras files to dwl directory
 copy-extras-files:
 	cp $(SRC_DIR)/scripting.c $(DWL_DIR)/
 	cp $(SRC_DIR)/scripting.h $(DWL_DIR)/
+	cp $(SRC_DIR)/attached_surface.c $(DWL_DIR)/attached_surface.c
+	cp $(SRC_DIR)/attached_surface.h $(DWL_DIR)/attached_surface.h
+	cp $(ATTACHED_SURFACE_DIR)/wlr-attached-surface-unstable-v1.xml $(DWL_DIR)/protocols/
 
 # Build dwl (standard)
 build:
@@ -82,8 +88,8 @@ unpatch:
 
 # Install dwl system-wide
 install: all
-	$(MAKE) -C $(DWL_DIR) install
+	$(MAKE) -C $(DWL_DIR) install PREFIX=$(PREFIX)
 
 # Uninstall dwl
 uninstall:
-	$(MAKE) -C $(DWL_DIR) uninstall
+	$(MAKE) -C $(DWL_DIR) uninstall PREFIX=$(PREFIX)
