@@ -1,0 +1,213 @@
+--- a/lib/dwl/b/lib/dwl/dwl.c	2025-12-21 05:43:21.536567679 -0800
++++ b/lib/dwl/dwl.c	2025-12-21 05:48:04.339549543 -0800
+@@ -352,6 +352,7 @@
+ static void pointerfocus(Client *c, struct wlr_surface *surface,
+ 		double sx, double sy, uint32_t time);
+ static void powermgrsetmode(struct wl_listener *listener, void *data);
++static void printstatus(void);
+ static void quit(const Arg *arg);
+ static void rendermon(struct wl_listener *listener, void *data);
+ static void requestdecorationmode(struct wl_listener *listener, void *data);
+@@ -1031,6 +1032,7 @@
+ 			setmon(c, selmon, c->tags);
+ 	}
+ 	focusclient(focustop(selmon), 1);
++	printstatus();
+ 	drawbars();
+ }
+ 
+@@ -1338,6 +1340,7 @@
+ 	else
+ 		wlr_output_layout_add(output_layout, wlr_output, m->m.x, m->m.y);
+ 
++	printstatus();
+ 	drawbars();
+ }
+ 
+@@ -1723,10 +1726,11 @@
+ 		x += w;
+ 	}
+ 
+-	/* Draw status text in the middle area */
++	/* Draw status text centered in the middle area */
+ 	if (m == selmon && truncstatus[0]) {
++		int center_x = x + (statuswidth - tw) / 2;
+ 		drwl_setscheme(m->drw, colors[SchemeNorm]);
+-		drwl_text(m->drw, x, 0, statuswidth, m->b.height, m->lrpad / 2, truncstatus, 0);
++		drwl_text(m->drw, center_x, 0, tw + m->lrpad, m->b.height, m->lrpad / 2, truncstatus, 0);
+ 	}
+ 
+ 	/* Draw systray at the right edge */
+@@ -1835,6 +1839,7 @@
+ 			client_activate_surface(old, 0);
+ 		}
+ 	}
++	printstatus();
+ 	drawbars();
+ 
+ 	if (!c) {
+@@ -2171,6 +2176,7 @@
+ 	} else {
+ 		applyrules(c);
+ 	}
++	printstatus();
+ 	drawbars();
+ 
+ unset_fullscreen:
+@@ -2514,6 +2520,44 @@
+ }
+ 
+ void
++printstatus(void)
++{
++	Monitor *m = NULL;
++	Client *c;
++	uint32_t occ, urg, sel;
++
++	wl_list_for_each(m, &mons, link) {
++		occ = urg = 0;
++		wl_list_for_each(c, &clients, link) {
++			if (c->mon != m)
++				continue;
++			occ |= c->tags;
++			if (c->isurgent)
++				urg |= c->tags;
++		}
++		if ((c = focustop(m))) {
++			printf("%s title %s\n", m->wlr_output->name, client_get_title(c));
++			printf("%s appid %s\n", m->wlr_output->name, client_get_appid(c));
++			printf("%s fullscreen %d\n", m->wlr_output->name, c->isfullscreen);
++			printf("%s floating %d\n", m->wlr_output->name, c->isfloating);
++			sel = c->tags;
++		} else {
++			printf("%s title \n", m->wlr_output->name);
++			printf("%s appid \n", m->wlr_output->name);
++			printf("%s fullscreen \n", m->wlr_output->name);
++			printf("%s floating \n", m->wlr_output->name);
++			sel = 0;
++		}
++
++		printf("%s selmon %u\n", m->wlr_output->name, m == selmon);
++		printf("%s tags %"PRIu32" %"PRIu32" %"PRIu32" %"PRIu32"\n",
++			m->wlr_output->name, occ, m->tagset[m->seltags], sel, urg);
++		printf("%s layout %s\n", m->wlr_output->name, m->ltsymbol);
++	}
++	fflush(stdout);
++}
++
++void
+ quit(const Arg *arg)
+ {
+ 	wl_display_terminate(dpy);
+@@ -2623,14 +2667,22 @@
+ 
+ 	/* Now that the socket exists and the backend is started, run the startup command */
+ 	if (startup_cmd) {
++		int piperw[2];
++		if (pipe(piperw) < 0)
++			die("startup: pipe:");
+ 		if ((child_pid = fork()) < 0)
+ 			die("startup: fork:");
+ 		if (child_pid == 0) {
+-			close(STDIN_FILENO);
+ 			setsid();
++			dup2(piperw[0], STDIN_FILENO);
++			close(piperw[0]);
++			close(piperw[1]);
+ 			execl("/bin/sh", "/bin/sh", "-c", startup_cmd, NULL);
+ 			die("startup: execl:");
+ 		}
++		dup2(piperw[1], STDOUT_FILENO);
++		close(piperw[1]);
++		close(piperw[0]);
+ 	}
+ 
+ 	/* Mark stdout as non-blocking to avoid the startup script
+@@ -2640,6 +2692,7 @@
+ 	if (fd_set_nonblock(STDOUT_FILENO) < 0)
+ 		close(STDOUT_FILENO);
+ 
++	printstatus();
+ 	drawbars();
+ 
+ 	/* At this point the outputs are initialized, choose initial selmon based on
+@@ -2706,6 +2759,7 @@
+ 			(p && p->isfullscreen) ? LyrFS
+ 			: c->isfloating ? LyrFloat : LyrTile]);
+ 	arrange(c->mon);
++	printstatus();
+ 	drawbars();
+ }
+ 
+@@ -2729,6 +2783,7 @@
+ 		resize(c, c->prev, 0);
+ 	}
+ 	arrange(c->mon);
++	printstatus();
+ 	drawbars();
+ }
+ 
+@@ -3108,6 +3163,7 @@
+ 	status[strcspn(status, "\n")] = '\0';
+ 
+ 	strncpy(stext, status, sizeof(stext));
++	printstatus();
+ 	drawbars();
+ 
+ 	return 0;
+@@ -3123,6 +3179,7 @@
+ 	sel->tags = arg->ui & TAGMASK;
+ 	focusclient(focustop(selmon), 1);
+ 	arrange(selmon);
++	printstatus();
+ 	drawbars();
+ }
+ 
+@@ -3218,6 +3275,7 @@
+ 	sel->tags = newtags;
+ 	focusclient(focustop(selmon), 1);
+ 	arrange(selmon);
++	printstatus();
+ 	drawbars();
+ }
+ 
+@@ -3231,6 +3289,7 @@
+ 	selmon->tagset[selmon->seltags] = newtagset;
+ 	focusclient(focustop(selmon), 1);
+ 	arrange(selmon);
++	printstatus();
+ 	drawbars();
+ }
+ 
+@@ -3279,6 +3338,7 @@
+ 	}
+ 
+ 	wlr_scene_node_destroy(&c->scene->node);
++	printstatus();
+ 	drawbars();
+ 	motionnotify(0, NULL, 0, 0, 0, 0);
+ }
+@@ -3460,6 +3520,7 @@
+ 		return;
+ 
+ 	c->isurgent = 1;
++	printstatus();
+ 	drawbars();
+ 
+ 	if (client_surface(c)->mapped)
+@@ -3476,6 +3537,7 @@
+ 		selmon->tagset[selmon->seltags] = arg->ui & TAGMASK;
+ 	focusclient(focustop(selmon), 1);
+ 	arrange(selmon);
++	printstatus();
+ 	drawbars();
+ }
+ 
+@@ -3689,6 +3751,7 @@
+ 		return;
+ 
+ 	c->isurgent = xcb_icccm_wm_hints_get_urgency(c->surface.xwayland->hints);
++	printstatus();
+ 	drawbars();
+ 
+ 	if (c->isurgent && surface && surface->mapped)
