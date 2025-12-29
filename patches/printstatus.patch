@@ -1,6 +1,16 @@
---- a/lib/dwl/b/lib/dwl/dwl.c	2025-12-21 05:43:21.536567679 -0800
-+++ b/lib/dwl/dwl.c	2025-12-21 05:48:04.339549543 -0800
-@@ -352,6 +352,7 @@
+--- a/lib/dwl/dwl.c	2025-12-27 06:22:19.186740584 -0800
++++ b/lib/dwl/dwl.c	2025-12-27 06:22:19.170997887 -0800
+@@ -11,6 +11,9 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <sys/wait.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <errno.h>
+ #include <time.h>
+ #include <unistd.h>
+ #include <wayland-server-core.h>
+@@ -352,6 +355,7 @@
  static void pointerfocus(Client *c, struct wlr_surface *surface,
  		double sx, double sy, uint32_t time);
  static void powermgrsetmode(struct wl_listener *listener, void *data);
@@ -8,7 +18,15 @@
  static void quit(const Arg *arg);
  static void rendermon(struct wl_listener *listener, void *data);
  static void requestdecorationmode(struct wl_listener *listener, void *data);
-@@ -1031,6 +1032,7 @@
+@@ -459,6 +463,7 @@
+ 
+ static char stext[256];
+ static struct wl_event_source *status_event_source;
++static int status_fifo_fd = -1;
+ 
+ static DBusConnection *bus_conn;
+ static struct wl_event_source *bus_source;
+@@ -1031,6 +1036,7 @@
  			setmon(c, selmon, c->tags);
  	}
  	focusclient(focustop(selmon), 1);
@@ -16,7 +34,7 @@
  	drawbars();
  }
  
-@@ -1338,6 +1340,7 @@
+@@ -1338,6 +1344,7 @@
  	else
  		wlr_output_layout_add(output_layout, wlr_output, m->m.x, m->m.y);
  
@@ -24,7 +42,7 @@
  	drawbars();
  }
  
-@@ -1723,10 +1726,11 @@
+@@ -1723,10 +1730,11 @@
  		x += w;
  	}
  
@@ -38,7 +56,7 @@
  	}
  
  	/* Draw systray at the right edge */
-@@ -1835,6 +1839,7 @@
+@@ -1835,6 +1843,7 @@
  			client_activate_surface(old, 0);
  		}
  	}
@@ -46,7 +64,7 @@
  	drawbars();
  
  	if (!c) {
-@@ -2171,6 +2176,7 @@
+@@ -2171,6 +2180,7 @@
  	} else {
  		applyrules(c);
  	}
@@ -54,7 +72,7 @@
  	drawbars();
  
  unset_fullscreen:
-@@ -2514,6 +2520,44 @@
+@@ -2514,6 +2524,44 @@
  }
  
  void
@@ -99,31 +117,7 @@
  quit(const Arg *arg)
  {
  	wl_display_terminate(dpy);
-@@ -2623,14 +2667,22 @@
- 
- 	/* Now that the socket exists and the backend is started, run the startup command */
- 	if (startup_cmd) {
-+		int piperw[2];
-+		if (pipe(piperw) < 0)
-+			die("startup: pipe:");
- 		if ((child_pid = fork()) < 0)
- 			die("startup: fork:");
- 		if (child_pid == 0) {
--			close(STDIN_FILENO);
- 			setsid();
-+			dup2(piperw[0], STDIN_FILENO);
-+			close(piperw[0]);
-+			close(piperw[1]);
- 			execl("/bin/sh", "/bin/sh", "-c", startup_cmd, NULL);
- 			die("startup: execl:");
- 		}
-+		dup2(piperw[1], STDOUT_FILENO);
-+		close(piperw[1]);
-+		close(piperw[0]);
- 	}
- 
- 	/* Mark stdout as non-blocking to avoid the startup script
-@@ -2640,6 +2692,7 @@
+@@ -2640,6 +2688,7 @@
  	if (fd_set_nonblock(STDOUT_FILENO) < 0)
  		close(STDOUT_FILENO);
  
@@ -131,7 +125,7 @@
  	drawbars();
  
  	/* At this point the outputs are initialized, choose initial selmon based on
-@@ -2706,6 +2759,7 @@
+@@ -2706,6 +2755,7 @@
  			(p && p->isfullscreen) ? LyrFS
  			: c->isfloating ? LyrFloat : LyrTile]);
  	arrange(c->mon);
@@ -139,7 +133,7 @@
  	drawbars();
  }
  
-@@ -2729,6 +2783,7 @@
+@@ -2729,6 +2779,7 @@
  		resize(c, c->prev, 0);
  	}
  	arrange(c->mon);
@@ -147,7 +141,38 @@
  	drawbars();
  }
  
-@@ -3108,6 +3163,7 @@
+@@ -3029,8 +3080,28 @@
+ 
+ 	drwl_init();
+ 
+-	status_event_source = wl_event_loop_add_fd(wl_display_get_event_loop(dpy),
+-		STDIN_FILENO, WL_EVENT_READABLE, statusin, NULL);
++	/* Open status FIFO for reading status updates */
++	{
++		const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
++		char fifo_path[256];
++		if (runtime_dir)
++			snprintf(fifo_path, sizeof(fifo_path), "%s/dwl-status.fifo", runtime_dir);
++		else
++			snprintf(fifo_path, sizeof(fifo_path), "/tmp/dwl-status.fifo");
++
++		/* Create FIFO if it doesn't exist */
++		if (mkfifo(fifo_path, 0600) < 0 && errno != EEXIST)
++			wlr_log(WLR_ERROR, "Failed to create status FIFO: %s", strerror(errno));
++
++		/* Open FIFO with O_RDWR to prevent hangup when no writer connected */
++		status_fifo_fd = open(fifo_path, O_RDWR | O_NONBLOCK);
++		if (status_fifo_fd >= 0) {
++			status_event_source = wl_event_loop_add_fd(wl_display_get_event_loop(dpy),
++				status_fifo_fd, WL_EVENT_READABLE, statusin, NULL);
++		} else {
++			wlr_log(WLR_INFO, "Status FIFO not available, status bar updates disabled");
++		}
++	}
+ 
+ 	bus_conn = dbus_bus_get(DBUS_BUS_SESSION, NULL);
+ 	if (!bus_conn)
+@@ -3108,6 +3179,7 @@
  	status[strcspn(status, "\n")] = '\0';
  
  	strncpy(stext, status, sizeof(stext));
@@ -155,7 +180,7 @@
  	drawbars();
  
  	return 0;
-@@ -3123,6 +3179,7 @@
+@@ -3123,6 +3195,7 @@
  	sel->tags = arg->ui & TAGMASK;
  	focusclient(focustop(selmon), 1);
  	arrange(selmon);
@@ -163,7 +188,7 @@
  	drawbars();
  }
  
-@@ -3218,6 +3275,7 @@
+@@ -3218,6 +3291,7 @@
  	sel->tags = newtags;
  	focusclient(focustop(selmon), 1);
  	arrange(selmon);
@@ -171,7 +196,7 @@
  	drawbars();
  }
  
-@@ -3231,6 +3289,7 @@
+@@ -3231,6 +3305,7 @@
  	selmon->tagset[selmon->seltags] = newtagset;
  	focusclient(focustop(selmon), 1);
  	arrange(selmon);
@@ -179,7 +204,7 @@
  	drawbars();
  }
  
-@@ -3279,6 +3338,7 @@
+@@ -3279,6 +3354,7 @@
  	}
  
  	wlr_scene_node_destroy(&c->scene->node);
@@ -187,7 +212,19 @@
  	drawbars();
  	motionnotify(0, NULL, 0, 0, 0, 0);
  }
-@@ -3460,6 +3520,7 @@
+@@ -3446,8 +3522,10 @@
+ updatetitle(struct wl_listener *listener, void *data)
+ {
+ 	Client *c = wl_container_of(listener, c, set_title);
+-	if (c == focustop(c->mon))
++	if (c == focustop(c->mon)) {
++		printstatus();
+ 		drawbars();
++	}
+ }
+ 
+ void
+@@ -3460,6 +3538,7 @@
  		return;
  
  	c->isurgent = 1;
@@ -195,7 +232,7 @@
  	drawbars();
  
  	if (client_surface(c)->mapped)
-@@ -3476,6 +3537,7 @@
+@@ -3476,6 +3555,7 @@
  		selmon->tagset[selmon->seltags] = arg->ui & TAGMASK;
  	focusclient(focustop(selmon), 1);
  	arrange(selmon);
@@ -203,7 +240,7 @@
  	drawbars();
  }
  
-@@ -3689,6 +3751,7 @@
+@@ -3689,6 +3769,7 @@
  		return;
  
  	c->isurgent = xcb_icccm_wm_hints_get_urgency(c->surface.xwayland->hints);
