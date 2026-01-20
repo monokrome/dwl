@@ -78,7 +78,7 @@ diff --git a/lib/dwl/dwl.c b/lib/dwl/dwl.c
  	wl_signal_add(&layer_shell->events.new_surface, &new_layer_surface);
 
 +	/* Set up attached surface protocol */
-+	attached_surface_init(dpy, scene);
++	attached_surface_init(dpy, output_layout);
 +
  	idle_notifier = wlr_idle_notifier_v1_create(dpy);
 

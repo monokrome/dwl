@@ -3,6 +3,7 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/types/wlr_output_layout.h>
 
 #include "attached_surface.h"
 #include "wlr-attached-surface-unstable-v1-protocol.h"
@@ -10,10 +11,74 @@
 static struct wl_global *manager_global = NULL;
 static struct wl_list attached_surfaces;
 static uint32_t serial_counter = 0;
+static struct wlr_output_layout *output_layout = NULL;
 
 static void attached_surface_destroy(AttachedSurface *as);
 
 /* --- Attached Surface Implementation --- */
+
+/* Get the available space for an attached surface based on screen bounds */
+static void get_constrained_size(AttachedSurface *as, uint32_t requested_w, uint32_t requested_h,
+		uint32_t *out_w, uint32_t *out_h)
+{
+	struct wlr_box output_box;
+	int parent_x = 0, parent_y = 0;
+	int32_t available_w, available_h;
+
+	*out_w = requested_w;
+	*out_h = requested_h;
+
+	if (!output_layout || !as->parent)
+		return;
+
+	/* Get parent's absolute position */
+	struct wlr_scene_tree *parent_tree = as->parent->base->surface->data;
+	if (parent_tree) {
+		wlr_scene_node_coords(&parent_tree->node, &parent_x, &parent_y);
+	}
+
+	/* Get total output layout bounds */
+	wlr_output_layout_get_box(output_layout, NULL, &output_box);
+
+	/* Calculate available space based on anchor */
+	switch (as->pending_anchor) {
+	case ATTACHED_ANCHOR_RIGHT:
+		/* Space from right edge of parent to right edge of screen */
+		available_w = (output_box.x + output_box.width) - (parent_x + as->parent->current.width + as->pending_anchor_margin);
+		available_h = output_box.height;
+		break;
+	case ATTACHED_ANCHOR_LEFT:
+		/* Space from left edge of screen to left edge of parent */
+		available_w = parent_x - as->pending_anchor_margin - output_box.x;
+		available_h = output_box.height;
+		break;
+	case ATTACHED_ANCHOR_TOP:
+		/* Space from top edge of screen to top edge of parent */
+		available_w = output_box.width;
+		available_h = parent_y - as->pending_anchor_margin - output_box.y;
+		break;
+	case ATTACHED_ANCHOR_BOTTOM:
+		/* Space from bottom edge of parent to bottom edge of screen */
+		available_w = output_box.width;
+		available_h = (output_box.y + output_box.height) - (parent_y + as->parent->current.height + as->pending_anchor_margin);
+		break;
+	default:
+		/* No anchor - just use full screen bounds for now */
+		available_w = output_box.width;
+		available_h = output_box.height;
+		break;
+	}
+
+	/* Constrain to available space (but don't go below 1) */
+	if (available_w > 0 && (uint32_t)available_w < requested_w)
+		*out_w = (uint32_t)available_w;
+	if (available_h > 0 && (uint32_t)available_h < requested_h)
+		*out_h = (uint32_t)available_h;
+
+	/* Minimum size of 1x1 */
+	if (*out_w == 0) *out_w = 1;
+	if (*out_h == 0) *out_h = 1;
+}
 
 /* Calculate position based on anchor, parent geometry, and surface size */
 static void calculate_anchored_position(AttachedSurface *as, int32_t *out_x, int32_t *out_y)
@@ -142,6 +207,17 @@ static void handle_surface_commit(struct wl_listener *listener, void *data)
 {
 	AttachedSurface *as = wl_container_of(listener, as, surface_commit);
 	int32_t x, y;
+
+	/* On first commit (before configured), send configure with constrained size */
+	if (as->configure_serial == 0) {
+		uint32_t constrained_w, constrained_h;
+		get_constrained_size(as, as->pending_width, as->pending_height,
+			&constrained_w, &constrained_h);
+		as->configure_serial = ++serial_counter;
+		zwlr_attached_surface_v1_send_configure(as->resource,
+			as->configure_serial, constrained_w, constrained_h);
+		return;
+	}
 
 	if (!as->configured) {
 		return;
@@ -288,12 +364,13 @@ static void manager_handle_get_attached_surface(struct wl_client *client,
 
 	wl_list_insert(&attached_surfaces, &as->link);
 
-	/* Send initial configure */
-	as->configure_serial = ++serial_counter;
-	as->pending_width = 200;
-	as->pending_height = 200;
-	zwlr_attached_surface_v1_send_configure(as->resource,
-		as->configure_serial, as->pending_width, as->pending_height);
+	/* Don't send configure here - wait for initial commit so client
+	 * has a chance to call set_size first. We'll send configure in
+	 * handle_surface_commit when we see the first commit. */
+	as->pending_width = 0;
+	as->pending_height = 0;
+	as->configured = 0;
+	as->configure_serial = 0;
 }
 
 static void manager_handle_destroy(struct wl_client *client,
@@ -321,9 +398,9 @@ static void manager_bind(struct wl_client *client, void *data,
 
 /* --- Public API --- */
 
-void attached_surface_init(struct wl_display *display, struct wlr_scene *scene)
+void attached_surface_init(struct wl_display *display, struct wlr_output_layout *layout)
 {
-	(void)scene; /* No longer needed - surfaces parent to their toplevel's scene tree */
+	output_layout = layout;
 	wl_list_init(&attached_surfaces);
 
 	manager_global = wl_global_create(display,

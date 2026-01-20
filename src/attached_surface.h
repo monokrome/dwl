@@ -3,6 +3,7 @@
 
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_scene.h>
+#include <wlr/types/wlr_output_layout.h>
 
 struct wlr_xdg_toplevel;
 
@@ -50,7 +51,7 @@ struct AttachedSurface {
 };
 
 /* Initialize the attached surface manager global */
-void attached_surface_init(struct wl_display *display, struct wlr_scene *scene);
+void attached_surface_init(struct wl_display *display, struct wlr_output_layout *layout);
 
 /* Clean up */
 void attached_surface_finish(void);
