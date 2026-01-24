@@ -31,6 +31,10 @@ static void get_constrained_size(AttachedSurface *as, uint32_t requested_w, uint
 	if (!output_layout || !as->parent)
 		return;
 
+	/* Safely get parent's scene tree - check all intermediate pointers */
+	if (!as->parent->base || !as->parent->base->surface)
+		return;
+
 	/* Get parent's absolute position */
 	struct wlr_scene_tree *parent_tree = as->parent->base->surface->data;
 	if (parent_tree) {

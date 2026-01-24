@@ -3,6 +3,9 @@
                         ((hex >> 16) & 0xFF) / 255.0f, \
                         ((hex >> 8) & 0xFF) / 255.0f, \
                         (hex & 0xFF) / 255.0f }
+
+/* Custom modifier for Right Alt only (doesn't conflict with wlroots modifiers) */
+#define RALT_MOD (1 << 20)
 /* appearance */
 static const int sloppyfocus               = 1;  /* focus follows mouse */
 static const int bypass_surface_visibility = 0;  /* 1 means idle inhibitors will disable idle tracking even if it's surface isn't visible  */
@@ -196,13 +199,13 @@ static const Button buttons[] = {
 	{ ClkLtSymbol, 0,      BTN_RIGHT,  setlayout,      {.v = &layouts[2]} },
 	{ ClkTitle,    0,      BTN_MIDDLE, zoom,           {0} },
 	{ ClkStatus,   0,      BTN_MIDDLE, spawn,          {.v = termcmd} },
-	{ ClkClient,   MODKEY, BTN_LEFT,   moveresize,     {.ui = CurMove} },
-	{ ClkClient,   MODKEY, BTN_MIDDLE, togglefloating, {0} },
-	{ ClkClient,   MODKEY, BTN_RIGHT,  moveresize,     {.ui = CurResize} },
+	{ ClkClient,   RALT_MOD, BTN_LEFT,   moveresize,     {.ui = CurMove} },
+	{ ClkClient,   RALT_MOD, BTN_MIDDLE, togglefloating, {0} },
+	{ ClkClient,   RALT_MOD, BTN_RIGHT,  moveresize,     {.ui = CurResize} },
 	{ ClkTagBar,   0,      BTN_LEFT,   view,           {0} },
 	{ ClkTagBar,   0,      BTN_RIGHT,  toggleview,     {0} },
-	{ ClkTagBar,   MODKEY, BTN_LEFT,   tag,            {0} },
-	{ ClkTagBar,   MODKEY, BTN_RIGHT,  toggletag,      {0} },
+	{ ClkTagBar,   RALT_MOD, BTN_LEFT,   tag,            {0} },
+	{ ClkTagBar,   RALT_MOD, BTN_RIGHT,  toggletag,      {0} },
 	{ ClkTray,     0,      BTN_LEFT,   trayactivate,   {0} },
 	{ ClkTray,     0,      BTN_RIGHT,  traymenu,       {0} },
 };
