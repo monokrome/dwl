@@ -81,6 +81,7 @@
 #include "systray/tray.h"
 #include "systray/watcher.h"
 #include "wallpaper.h"
+#include "scripting.h"
 
 /* macros */
 #define MAX(A, B)               ((A) > (B) ? (A) : (B))
@@ -520,6 +521,10 @@ static struct wlr_xwayland *xwayland;
 #endif
 
 /* configuration, allows nested code to access above variables */
+#ifdef SCRIPTING
+static void reloadscripts(const Arg *arg);
+#endif
+
 #include "config.h"
 
 /* attempt to encapsulate suck into one file */
@@ -918,6 +923,9 @@ cleanup(void)
 		watcher_stop(&watcher);
 
 	wallpaper_cleanup();
+
+	scripting_on_quit();
+	scripting_cleanup();
 
 	if (showbar && showsystray) {
 		stopbus(bus_conn, bus_source);
@@ -1369,6 +1377,7 @@ createnotify(struct wl_listener *listener, void *data)
 	LISTEN(&toplevel->events.request_fullscreen, &c->fullscreen, fullscreennotify);
 	LISTEN(&toplevel->events.request_maximize, &c->maximize, maximizenotify);
 	LISTEN(&toplevel->events.set_title, &c->set_title, updatetitle);
+	scripting_on_client_create(c);
 }
 
 void
@@ -1581,6 +1590,7 @@ destroynotify(struct wl_listener *listener, void *data)
 		wl_list_remove(&c->unmap.link);
 		wl_list_remove(&c->maximize.link);
 	}
+	scripting_on_client_destroy(c);
 	free(c);
 }
 
@@ -1861,6 +1871,7 @@ focusclient(Client *c, int lift)
 
 	/* Activate the new client */
 	client_activate_surface(client_surface(c), 1);
+	scripting_on_client_focus(c);
 }
 
 void
@@ -3120,6 +3131,10 @@ setup(void)
 	wallpaper_set_event_loop(event_loop);
 	wlr_scene_node_lower_to_bottom(&root_bg->node); /* Put root_bg below wallpaper */
 
+	/* Initialize Wren scripting */
+	scripting_init();
+	scripting_on_startup();
+
 	/* Make sure XWayland clients don't connect to the parent X server,
 	 * e.g when running in the x11 backend or the wayland backend and the
 	 * compositor has Xwayland support */
@@ -3826,3 +3841,49 @@ main(int argc, char *argv[])
 usage:
 	die("Usage: %s [-v] [-d] [-s startup command]", argv[0]);
 }
+
+/* Script wrapper functions for Wren scripting support */
+#ifdef SCRIPTING
+void script_spawn(const char *cmd) {
+	const char *args[] = { "/bin/sh", "-c", cmd, NULL };
+	spawn(&(Arg){ .v = args });
+}
+
+void script_quit(void) {
+	quit(NULL);
+}
+
+void script_focusstack(int dir) {
+	focusstack(&(Arg){ .i = dir });
+}
+
+void script_view(unsigned int tag) {
+	view(&(Arg){ .ui = tag });
+}
+
+void script_tag(unsigned int t) {
+	tag(&(Arg){ .ui = t });
+}
+
+void script_toggleview(unsigned int tag) {
+	toggleview(&(Arg){ .ui = tag });
+}
+
+void script_toggletag(unsigned int tag) {
+	toggletag(&(Arg){ .ui = tag });
+}
+
+void script_setmfact(float f) { setmfact(&(Arg){ .f = f }); }
+void script_incnmaster(int n) { incnmaster(&(Arg){ .i = n }); }
+void script_killclient(void) { killclient(NULL); }
+void script_togglefloating(void) { togglefloating(NULL); }
+void script_togglefullscreen(void) { togglefullscreen(NULL); }
+void script_focusmon(int dir) { focusmon(&(Arg){ .i = dir }); }
+void script_tagmon(int dir) { tagmon(&(Arg){ .i = dir }); }
+
+static void
+reloadscripts(const Arg *arg)
+{
+	scripting_reload();
+}
+#endif /* SCRIPTING */

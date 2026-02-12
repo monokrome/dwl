@@ -16,12 +16,33 @@ PKGS      = wayland-server xkbcommon libinput pixman-1 fcft $(XLIBS) dbus-1
 DWLCFLAGS = `$(PKG_CONFIG) --cflags $(PKGS)` $(WLR_INCS) $(DWLCPPFLAGS) $(DWLDEVCFLAGS) $(CFLAGS)
 LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
 
+# Wren scripting (optional)
+WREN_DIR = ../wren
+WREN_SRC = $(WREN_DIR)/src/vm/wren_vm.c $(WREN_DIR)/src/vm/wren_compiler.c \
+           $(WREN_DIR)/src/vm/wren_core.c $(WREN_DIR)/src/vm/wren_debug.c \
+           $(WREN_DIR)/src/vm/wren_primitive.c $(WREN_DIR)/src/vm/wren_utils.c \
+           $(WREN_DIR)/src/vm/wren_value.c $(WREN_DIR)/src/optional/wren_opt_meta.c \
+           $(WREN_DIR)/src/optional/wren_opt_random.c
+WREN_INC = -I$(WREN_DIR)/src/include -I$(WREN_DIR)/src/vm -I$(WREN_DIR)/src/optional
+
+# OpenGL ES for shader wallpapers (extras build)
+GLES_CFLAGS = `$(PKG_CONFIG) --cflags glesv2 egl`
+GLES_LIBS = `$(PKG_CONFIG) --libs glesv2 egl`
+
 TRAYOBJS = systray/watcher.o systray/tray.o systray/item.o systray/icon.o systray/menu.o systray/helpers.o
 TRAYDEPS = systray/watcher.h systray/tray.h systray/item.h systray/icon.h systray/menu.h systray/helpers.h
 
 all: dwl
 dwl: dwl.o util.o dbus.o wallpaper.o $(TRAYOBJS)
 	$(CC) dwl.o util.o dbus.o wallpaper.o $(TRAYOBJS) $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
+
+# Build with extras: Wren scripting + GLSL shader wallpapers
+extras: DWLCPPFLAGS += -DSCRIPTING -DEXTRAS $(WREN_INC) $(GLES_CFLAGS)
+extras: dwl.o util.o dbus.o wallpaper.o scripting.o $(TRAYOBJS)
+	$(CC) $(WREN_SRC) dwl.o util.o dbus.o wallpaper.o scripting.o $(TRAYOBJS) $(DWLCFLAGS) $(WREN_INC) $(GLES_CFLAGS) $(LDFLAGS) $(LDLIBS) $(GLES_LIBS) -o dwl
+
+scripting.o: scripting.c scripting.h
+	$(CC) $(CPPFLAGS) $(DWLCFLAGS) -DSCRIPTING -DEXTRAS $(WREN_INC) $(GLES_CFLAGS) -o $@ -c $<
 dwl.o: dwl.c client.h dbus.h config.h config.mk cursor-shape-v1-protocol.h \
 	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
 	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h \
@@ -88,7 +109,7 @@ sirius laptop desktop:
 	fi
 
 clean:
-	rm -f dwl *.o *-protocol.h systray/*.o config.h config.h.tmp
+	rm -f dwl *.o *-protocol.h systray/*.o config.h config.h.tmp scripting.o
 
 dist: clean
 	mkdir -p dwl-$(VERSION)
