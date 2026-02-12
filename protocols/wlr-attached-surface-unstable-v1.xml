@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="wlr_attached_surface_unstable_v1">
+  <copyright>
+    Copyright © 2025 Bailey Stoner
+
+    Permission to use, copy, modify, distribute, and sell this
+    software and its documentation for any purpose is hereby granted
+    without fee, provided that the above copyright notice appear in
+    all copies and that both that copyright notice and this permission
+    notice appear in supporting documentation, and that the name of
+    the copyright holders not be used in advertising or publicity
+    pertaining to distribution of the software without specific,
+    written prior permission. The copyright holders make no
+    representations about the suitability of this software for any
+    purpose. It is provided "as is" without express or implied
+    warranty.
+
+    THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS
+    SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+    FITNESS, IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY
+    SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+    WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+    AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+    ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+    THIS SOFTWARE.
+  </copyright>
+
+  <interface name="zwlr_attached_surface_manager_v1" version="1">
+    <description summary="create surfaces attached to toplevels">
+      This interface allows clients to create surfaces that are attached to
+      and positioned relative to an xdg_toplevel window. Unlike subsurfaces,
+      attached surfaces can extend beyond the parent window's bounds and are
+      rendered independently. Unlike popups, they are not dismissed when
+      focus changes.
+
+      This is useful for persistent auxiliary UI such as preview panels,
+      toolbars, or inspectors that should appear adjacent to a window.
+    </description>
+
+    <request name="get_attached_surface">
+      <description summary="create an attached surface">
+        Create an attached surface for an existing wl_surface, attaching it
+        to the specified xdg_toplevel parent.
+
+        Creating an attached surface from a wl_surface which has a buffer
+        attached or committed is a client error, and any attempts by a client
+        to attach or manipulate a buffer prior to the first configure event
+        must also be treated as errors.
+
+        After creating an attached surface and setting it up, the client must
+        perform an initial commit without any buffer attached. The compositor
+        will reply with a configure event. The client must acknowledge it and
+        is then allowed to attach a buffer to map the surface.
+      </description>
+      <arg name="id" type="new_id" interface="zwlr_attached_surface_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+      <arg name="parent" type="object"/>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        Destroy the attached surface manager. Attached surfaces created
+        through this manager are not affected.
+      </description>
+    </request>
+
+    <enum name="error">
+      <entry name="role" value="0" summary="wl_surface has another role"/>
+      <entry name="already_constructed" value="1" summary="wl_surface has a buffer attached or committed"/>
+      <entry name="invalid_parent" value="2" summary="parent is not an xdg_toplevel"/>
+    </enum>
+  </interface>
+
+  <interface name="zwlr_attached_surface_v1" version="1">
+    <description summary="attached surface interface">
+      An interface for surfaces attached to an xdg_toplevel. These surfaces
+      are positioned relative to their parent toplevel and can extend beyond
+      the parent's bounds.
+
+      Attached surface state (position, size) is double-buffered and will be
+      applied at the time wl_surface.commit of the corresponding wl_surface
+      is called.
+
+      Attaching a null buffer to an attached surface unmaps it.
+    </description>
+
+    <enum name="anchor">
+      <description summary="anchor edge">
+        Specifies which edge of the parent window the surface is anchored to.
+        When anchored, the compositor automatically positions the surface
+        adjacent to that edge, and repositions it when the parent resizes.
+      </description>
+      <entry name="none" value="0" summary="no anchor, use manual positioning"/>
+      <entry name="top" value="1" summary="anchor to top edge"/>
+      <entry name="bottom" value="2" summary="anchor to bottom edge"/>
+      <entry name="left" value="3" summary="anchor to left edge"/>
+      <entry name="right" value="4" summary="anchor to right edge"/>
+    </enum>
+
+    <request name="set_anchor">
+      <description summary="set anchor edge and margin">
+        Set the anchor edge and margin for automatic positioning. When an
+        anchor is set, the compositor positions the surface adjacent to
+        that edge of the parent window, offset by the margin.
+
+        The offset parameter positions the surface along the anchored edge:
+        - For left/right anchors: offset from the top of the parent
+        - For top/bottom anchors: offset from the left of the parent
+
+        Setting anchor to "none" disables automatic positioning and the
+        surface uses manual set_position coordinates instead.
+
+        Anchor state is double-buffered, see wl_surface.commit.
+      </description>
+      <arg name="anchor" type="uint" enum="anchor"/>
+      <arg name="margin" type="int" summary="gap between parent and surface"/>
+      <arg name="offset" type="int" summary="offset along the anchored edge"/>
+    </request>
+
+    <request name="set_position">
+      <description summary="set position relative to parent">
+        Set the position of the surface relative to the parent toplevel's
+        top-left corner, in surface-local coordinates. The surface can be
+        positioned outside the parent's bounds.
+
+        This is only used when anchor is set to "none". When an anchor is
+        set, the compositor calculates position automatically.
+
+        Position is double-buffered, see wl_surface.commit.
+      </description>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+    </request>
+
+    <request name="set_size">
+      <description summary="set the size of the surface">
+        Set the size of the surface in surface-local coordinates.
+
+        Size is double-buffered, see wl_surface.commit.
+      </description>
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+    </request>
+
+    <request name="ack_configure">
+      <description summary="ack a configure event">
+        When a configure event is received, if a client commits the surface
+        in response to the configure event, then the client must make an
+        ack_configure request sometime before the commit request, passing
+        along the serial of the configure event.
+
+        A client is not required to commit immediately after sending an
+        ack_configure request - it may even ack_configure several times
+        before its next surface commit.
+      </description>
+      <arg name="serial" type="uint" summary="the serial from the configure event"/>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the attached surface">
+        Destroy the attached surface.
+      </description>
+    </request>
+
+    <event name="configure">
+      <description summary="suggest a surface change">
+        The configure event asks the client to resize its surface.
+
+        Clients should arrange their surface for the new size, and then send
+        an ack_configure request with the serial sent in this configure event
+        before committing the new surface.
+
+        The width and height arguments specify the size of the surface in
+        surface-local coordinates.
+      </description>
+      <arg name="serial" type="uint"/>
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+    </event>
+
+    <event name="closed">
+      <description summary="surface should be closed">
+        The closed event is sent by the compositor when the surface will no
+        longer be shown. This happens when the parent toplevel is destroyed.
+        The client should destroy the attached surface after receiving this
+        event.
+      </description>
+    </event>
+
+    <enum name="error">
+      <entry name="invalid_size" value="0" summary="size is invalid"/>
+    </enum>
+  </interface>
+</protocol>

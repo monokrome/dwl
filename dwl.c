@@ -82,6 +82,7 @@
 #include "systray/watcher.h"
 #include "wallpaper.h"
 #include "scripting.h"
+#include "attached_surface.h"
 
 /* macros */
 #define MAX(A, B)               ((A) > (B) ? (A) : (B))
@@ -616,6 +617,7 @@ arrange(Monitor *m)
 		m->lt[m->sellt]->arrange(m);
 	motionnotify(0, NULL, 0, 0, 0, 0);
 	checkidleinhibitor(NULL);
+	attached_surface_update_positions();
 }
 
 void
@@ -910,6 +912,7 @@ cleanup(void)
 	wlr_xwayland_destroy(xwayland);
 	xwayland = NULL;
 #endif
+	attached_surface_finish();
 	wl_display_destroy_clients(dpy);
 	if (child_pid > 0) {
 		kill(-child_pid, SIGTERM);
@@ -1111,6 +1114,7 @@ commitnotify(struct wl_listener *listener, void *data)
 	}
 
 	resize(c, c->geom, (c->isfloating && !c->isfullscreen));
+	attached_surface_update_positions();
 
 	/* mark a pending resize as completed */
 	if (c->resize && c->resize <= c->surface.xdg->current.configure_serial)
@@ -3007,6 +3011,9 @@ setup(void)
 
 	layer_shell = wlr_layer_shell_v1_create(dpy, 3);
 	wl_signal_add(&layer_shell->events.new_surface, &new_layer_surface);
+
+	/* Set up attached surface protocol */
+	attached_surface_init(dpy, output_layout);
 
 	idle_notifier = wlr_idle_notifier_v1_create(dpy);
 
