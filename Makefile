@@ -17,7 +17,7 @@ DWLCFLAGS = `$(PKG_CONFIG) --cflags $(PKGS)` $(WLR_INCS) $(DWLCPPFLAGS) $(DWLDEV
 LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
 
 # Wren scripting (optional)
-WREN_DIR = ../wren
+WREN_DIR = lib/wren
 WREN_SRC = $(WREN_DIR)/src/vm/wren_vm.c $(WREN_DIR)/src/vm/wren_compiler.c \
            $(WREN_DIR)/src/vm/wren_core.c $(WREN_DIR)/src/vm/wren_debug.c \
            $(WREN_DIR)/src/vm/wren_primitive.c $(WREN_DIR)/src/vm/wren_utils.c \
@@ -91,29 +91,14 @@ xdg-shell-protocol.h:
 	$(WAYLAND_SCANNER) server-header \
 		$(WAYLAND_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml $@
 
-# Default config: apply monokrome.patch to config.def.h
-config.h:
-	@if [ -f monokrome.patch ]; then \
-		echo "Applying monokrome.patch to config.def.h"; \
-		patch -o $@ config.def.h < monokrome.patch; \
-	else \
-		cp config.def.h $@; \
-	fi
-
 # Machine-specific builds: make sirius, make laptop, etc.
-# Applies monokrome.patch, then replaces monrules with machine-specific config from monitors/<name>.h
+# Injects monitor-specific rules from monitors/<name>.h into config.h
 sirius laptop desktop:
 	@if [ -f monitors/$@.h ]; then \
 		echo "Building for machine: $@"; \
-		if [ -f monokrome.patch ]; then \
-			echo "Applying monokrome.patch..."; \
-			patch -o config.h.tmp config.def.h < monokrome.patch; \
-		else \
-			cp config.def.h config.h.tmp; \
-		fi; \
-		sed '/MONITORS_PLACEHOLDER/,/^};/d' config.h.tmp | \
-		sed '/NOTE: ALWAYS add a fallback rule/r monitors/$@.h' > config.h; \
-		rm -f config.h.tmp; \
+		sed '/MONITORS_PLACEHOLDER/,/^};/d' config.h | \
+		sed '/NOTE: ALWAYS add a fallback rule/r monitors/$@.h' > config.h.tmp; \
+		mv config.h.tmp config.h; \
 		$(MAKE) dwl; \
 	else \
 		echo "No monitor config found: monitors/$@.h"; \
@@ -121,7 +106,7 @@ sirius laptop desktop:
 	fi
 
 clean:
-	rm -f dwl *.o *-protocol.h systray/*.o config.h config.h.tmp scripting.o
+	rm -f dwl *.o *-protocol.h *-protocol.c systray/*.o config.h.tmp
 
 dist: clean
 	mkdir -p dwl-$(VERSION)

@@ -1,0 +1,6 @@
+[submodule "lib/wren"]
+	path = lib/wren
+	url = https://github.com/wren-lang/wren
+[submodule "lib/wlr-attached-surface"]
+	path = lib/wlr-attached-surface
+	url = https://github.com/monokrome/wlr-attached-surface
