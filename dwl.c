@@ -83,6 +83,7 @@
 #include "wallpaper.h"
 #include "scripting.h"
 #include "attached_surface.h"
+#include <linux/input-event-codes.h>
 
 /* macros */
 #define MAX(A, B)               ((A) > (B) ? (A) : (B))
@@ -526,6 +527,8 @@ static struct wlr_xwayland *xwayland;
 static void reloadscripts(const Arg *arg);
 #endif
 
+static int ralt_pressed = 0;  /* Track Right Alt key state */
+
 #include "config.h"
 
 /* attempt to encapsulate suck into one file */
@@ -847,6 +850,13 @@ buttonpress(struct wl_listener *listener, void *data)
 
 		keyboard = wlr_seat_get_keyboard(seat);
 		mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
+
+		/* Replace ALT with RALT_MOD when Right Alt is pressed */
+		if (ralt_pressed) {
+			mods &= ~WLR_MODIFIER_ALT;  /* Clear the regular ALT modifier */
+			mods |= RALT_MOD;           /* Set our custom Right Alt flag */
+		}
+
 		for (b = buttons; b < END(buttons); b++) {
 			if (CLEANMASK(mods) == CLEANMASK(b->mod) && event->button == b->button && click == b->click && b->func) {
 				if (click == ClkTagBar && b->arg.i == 0)
@@ -2047,6 +2057,14 @@ keypress(struct wl_listener *listener, void *data)
 
 	int handled = 0;
 	uint32_t mods = wlr_keyboard_get_modifiers(&group->wlr_group->keyboard);
+
+	/* Track Right Alt key state */
+	if (event->keycode == KEY_RIGHTALT) {
+		if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED)
+			ralt_pressed = 1;
+		else
+			ralt_pressed = 0;
+	}
 
 	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
 
