@@ -151,6 +151,7 @@ typedef struct {
 	unsigned int bw;
 	uint32_t tags;
 	int isfloating, isurgent, isfullscreen;
+	float cfact;
 	uint32_t resize; /* configure serial of a pending resize */
 } Client;
 
@@ -364,6 +365,7 @@ static void setfloating(Client *c, int floating);
 static void setfullscreen(Client *c, int fullscreen);
 static void setlayout(const Arg *arg);
 static void setmfact(const Arg *arg);
+static void setcfact(const Arg *arg);
 static void setmon(Client *c, Monitor *m, uint32_t newtags);
 static void setpsel(struct wl_listener *listener, void *data);
 static void setsel(struct wl_listener *listener, void *data);
@@ -1350,6 +1352,7 @@ createnotify(struct wl_listener *listener, void *data)
 	c = toplevel->base->data = ecalloc(1, sizeof(*c));
 	c->surface.xdg = toplevel->base;
 	c->bw = borderpx;
+	c->cfact = 1.0;
 
 	LISTEN(&toplevel->base->surface->events.commit, &c->commit, commitnotify);
 	LISTEN(&toplevel->base->surface->events.map, &c->map, mapnotify);
@@ -2729,6 +2732,22 @@ setmfact(const Arg *arg)
 }
 
 void
+setcfact(const Arg *arg)
+{
+	Client *sel = focustop(selmon);
+	float f;
+
+	if (!arg || !sel || sel->isfloating)
+		return;
+
+	f = arg->f == 0.0f ? 1.0f : sel->cfact + arg->f;
+	if (f < 0.25f || f > 4.0f)
+		return;
+	sel->cfact = f;
+	arrange(selmon);
+}
+
+void
 setmon(Client *c, Monitor *m, uint32_t newtags)
 {
 	Monitor *oldmon = c->mon;
@@ -3089,7 +3108,8 @@ tagmon(const Arg *arg)
 void
 tile(Monitor *m)
 {
-	unsigned int mw, my, ty;
+	unsigned int mw, my, ty, h;
+	float mfacts = 0, sfacts = 0;
 	int i, n = 0;
 	Client *c;
 
@@ -3103,18 +3123,30 @@ tile(Monitor *m)
 		mw = m->nmaster ? (int)roundf(m->w.width * m->mfact) : 0;
 	else
 		mw = m->w.width;
+	i = 0;
+	wl_list_for_each(c, &clients, link) {
+		if (!VISIBLEON(c, m) || c->isfloating || c->isfullscreen)
+			continue;
+		if (i < m->nmaster)
+			mfacts += c->cfact;
+		else
+			sfacts += c->cfact;
+		i++;
+	}
 	i = my = ty = 0;
 	wl_list_for_each(c, &clients, link) {
 		if (!VISIBLEON(c, m) || c->isfloating || c->isfullscreen)
 			continue;
 		if (i < m->nmaster) {
-			resize(c, (struct wlr_box){.x = m->w.x, .y = m->w.y + my, .width = mw,
-				.height = (m->w.height - my) / (MIN(n, m->nmaster) - i)}, 0);
+			h = (m->w.height - my) * (c->cfact / mfacts);
+			resize(c, (struct wlr_box){.x = m->w.x, .y = m->w.y + my, .width = mw, .height = h}, 0);
 			my += c->geom.height;
+			mfacts -= c->cfact;
 		} else {
-			resize(c, (struct wlr_box){.x = m->w.x + mw, .y = m->w.y + ty,
-				.width = m->w.width - mw, .height = (m->w.height - ty) / (n - i)}, 0);
+			h = (m->w.height - ty) * (c->cfact / sfacts);
+			resize(c, (struct wlr_box){.x = m->w.x + mw, .y = m->w.y + ty, .width = m->w.width - mw, .height = h}, 0);
 			ty += c->geom.height;
+			sfacts -= c->cfact;
 		}
 		i++;
 	}
