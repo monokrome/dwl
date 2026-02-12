@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <time.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
@@ -353,6 +356,7 @@ static void outputmgrtest(struct wl_listener *listener, void *data);
 static void pointerfocus(Client *c, struct wlr_surface *surface,
 		double sx, double sy, uint32_t time);
 static void powermgrsetmode(struct wl_listener *listener, void *data);
+static void printstatus(void);
 static void quit(const Arg *arg);
 static void rendermon(struct wl_listener *listener, void *data);
 static void requestdecorationmode(struct wl_listener *listener, void *data);
@@ -460,6 +464,7 @@ static Monitor *selmon;
 
 static char stext[256];
 static struct wl_event_source *status_event_source;
+static int status_fifo_fd = -1;
 
 static DBusConnection *bus_conn;
 static struct wl_event_source *bus_source;
@@ -1032,6 +1037,7 @@ closemon(Monitor *m)
 			setmon(c, selmon, c->tags);
 	}
 	focusclient(focustop(selmon), 1);
+	printstatus();
 	drawbars();
 }
 
@@ -1339,6 +1345,7 @@ createmon(struct wl_listener *listener, void *data)
 	else
 		wlr_output_layout_add(output_layout, wlr_output, m->m.x, m->m.y);
 
+	printstatus();
 	drawbars();
 }
 
@@ -1724,10 +1731,11 @@ drawbar(Monitor *m)
 		x += w;
 	}
 
-	/* Draw status text in the middle area */
+	/* Draw status text centered in the middle area */
 	if (m == selmon && truncstatus[0]) {
+		int center_x = x + (statuswidth - tw) / 2;
 		drwl_setscheme(m->drw, colors[SchemeNorm]);
-		drwl_text(m->drw, x, 0, statuswidth, m->b.height, m->lrpad / 2, truncstatus, 0);
+		drwl_text(m->drw, center_x, 0, tw + m->lrpad, m->b.height, m->lrpad / 2, truncstatus, 0);
 	}
 
 	/* Draw systray at the right edge */
@@ -1836,6 +1844,7 @@ focusclient(Client *c, int lift)
 			client_activate_surface(old, 0);
 		}
 	}
+	printstatus();
 	drawbars();
 
 	if (!c) {
@@ -2173,6 +2182,7 @@ mapnotify(struct wl_listener *listener, void *data)
 	} else {
 		applyrules(c);
 	}
+	printstatus();
 	drawbars();
 
 unset_fullscreen:
@@ -2516,6 +2526,44 @@ powermgrsetmode(struct wl_listener *listener, void *data)
 }
 
 void
+printstatus(void)
+{
+	Monitor *m = NULL;
+	Client *c;
+	uint32_t occ, urg, sel;
+
+	wl_list_for_each(m, &mons, link) {
+		occ = urg = 0;
+		wl_list_for_each(c, &clients, link) {
+			if (c->mon != m)
+				continue;
+			occ |= c->tags;
+			if (c->isurgent)
+				urg |= c->tags;
+		}
+		if ((c = focustop(m))) {
+			printf("%s title %s\n", m->wlr_output->name, client_get_title(c));
+			printf("%s appid %s\n", m->wlr_output->name, client_get_appid(c));
+			printf("%s fullscreen %d\n", m->wlr_output->name, c->isfullscreen);
+			printf("%s floating %d\n", m->wlr_output->name, c->isfloating);
+			sel = c->tags;
+		} else {
+			printf("%s title \n", m->wlr_output->name);
+			printf("%s appid \n", m->wlr_output->name);
+			printf("%s fullscreen \n", m->wlr_output->name);
+			printf("%s floating \n", m->wlr_output->name);
+			sel = 0;
+		}
+
+		printf("%s selmon %u\n", m->wlr_output->name, m == selmon);
+		printf("%s tags %"PRIu32" %"PRIu32" %"PRIu32" %"PRIu32"\n",
+			m->wlr_output->name, occ, m->tagset[m->seltags], sel, urg);
+		printf("%s layout %s\n", m->wlr_output->name, m->ltsymbol);
+	}
+	fflush(stdout);
+}
+
+void
 quit(const Arg *arg)
 {
 	wl_display_terminate(dpy);
@@ -2642,6 +2690,7 @@ run(char *startup_cmd)
 	if (fd_set_nonblock(STDOUT_FILENO) < 0)
 		close(STDOUT_FILENO);
 
+	printstatus();
 	drawbars();
 
 	/* At this point the outputs are initialized, choose initial selmon based on
@@ -2708,6 +2757,7 @@ setfloating(Client *c, int floating)
 			(p && p->isfullscreen) ? LyrFS
 			: c->isfloating ? LyrFloat : LyrTile]);
 	arrange(c->mon);
+	printstatus();
 	drawbars();
 }
 
@@ -2731,6 +2781,7 @@ setfullscreen(Client *c, int fullscreen)
 		resize(c, c->prev, 0);
 	}
 	arrange(c->mon);
+	printstatus();
 	drawbars();
 }
 
@@ -3032,8 +3083,28 @@ setup(void)
 
 	drwl_init();
 
-	status_event_source = wl_event_loop_add_fd(wl_display_get_event_loop(dpy),
-		STDIN_FILENO, WL_EVENT_READABLE, statusin, NULL);
+	/* Open status FIFO for reading status updates */
+	{
+		const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+		char fifo_path[256];
+		if (runtime_dir)
+			snprintf(fifo_path, sizeof(fifo_path), "%s/dwl-status.fifo", runtime_dir);
+		else
+			snprintf(fifo_path, sizeof(fifo_path), "/tmp/dwl-status.fifo");
+
+		/* Create FIFO if it doesn't exist */
+		if (mkfifo(fifo_path, 0600) < 0 && errno != EEXIST)
+			wlr_log(WLR_ERROR, "Failed to create status FIFO: %s", strerror(errno));
+
+		/* Open FIFO with O_RDWR to prevent hangup when no writer connected */
+		status_fifo_fd = open(fifo_path, O_RDWR | O_NONBLOCK);
+		if (status_fifo_fd >= 0) {
+			status_event_source = wl_event_loop_add_fd(wl_display_get_event_loop(dpy),
+				status_fifo_fd, WL_EVENT_READABLE, statusin, NULL);
+		} else {
+			wlr_log(WLR_INFO, "Status FIFO not available, status bar updates disabled");
+		}
+	}
 
 	bus_conn = dbus_bus_get(DBUS_BUS_SESSION, NULL);
 	if (!bus_conn)
@@ -3111,6 +3182,7 @@ statusin(int fd, unsigned int mask, void *data)
 	status[strcspn(status, "\n")] = '\0';
 
 	strncpy(stext, status, sizeof(stext));
+	printstatus();
 	drawbars();
 
 	return 0;
@@ -3126,6 +3198,7 @@ tag(const Arg *arg)
 	sel->tags = arg->ui & TAGMASK;
 	focusclient(focustop(selmon), 1);
 	arrange(selmon);
+	printstatus();
 	drawbars();
 }
 
@@ -3221,6 +3294,7 @@ toggletag(const Arg *arg)
 	sel->tags = newtags;
 	focusclient(focustop(selmon), 1);
 	arrange(selmon);
+	printstatus();
 	drawbars();
 }
 
@@ -3234,6 +3308,7 @@ toggleview(const Arg *arg)
 	selmon->tagset[selmon->seltags] = newtagset;
 	focusclient(focustop(selmon), 1);
 	arrange(selmon);
+	printstatus();
 	drawbars();
 }
 
@@ -3282,6 +3357,7 @@ unmapnotify(struct wl_listener *listener, void *data)
 	}
 
 	wlr_scene_node_destroy(&c->scene->node);
+	printstatus();
 	drawbars();
 	motionnotify(0, NULL, 0, 0, 0, 0);
 }
@@ -3449,8 +3525,10 @@ void
 updatetitle(struct wl_listener *listener, void *data)
 {
 	Client *c = wl_container_of(listener, c, set_title);
-	if (c == focustop(c->mon))
+	if (c == focustop(c->mon)) {
+		printstatus();
 		drawbars();
+	}
 }
 
 void
@@ -3463,6 +3541,7 @@ urgent(struct wl_listener *listener, void *data)
 		return;
 
 	c->isurgent = 1;
+	printstatus();
 	drawbars();
 
 	if (client_surface(c)->mapped)
@@ -3479,6 +3558,7 @@ view(const Arg *arg)
 		selmon->tagset[selmon->seltags] = arg->ui & TAGMASK;
 	focusclient(focustop(selmon), 1);
 	arrange(selmon);
+	printstatus();
 	drawbars();
 }
 
@@ -3692,6 +3772,7 @@ sethints(struct wl_listener *listener, void *data)
 		return;
 
 	c->isurgent = xcb_icccm_wm_hints_get_urgency(c->surface.xwayland->hints);
+	printstatus();
 	drawbars();
 
 	if (c->isurgent && surface && surface->mapped)
