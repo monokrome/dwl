@@ -345,6 +345,7 @@ static void motionabsolute(struct wl_listener *listener, void *data);
 static void motionnotify(uint32_t time, struct wlr_input_device *device, double sx,
 		double sy, double sx_unaccel, double sy_unaccel);
 static void motionrelative(struct wl_listener *listener, void *data);
+static void movestack(const Arg *arg);
 static void moveresize(const Arg *arg);
 static void outputmgrapply(struct wl_listener *listener, void *data);
 static void outputmgrapplyortest(struct wlr_output_configuration_v1 *config, int test);
@@ -2315,6 +2316,37 @@ motionnotify(uint32_t time, struct wlr_input_device *device, double dx, double d
 		wlr_cursor_set_xcursor(cursor, cursor_mgr, "default");
 
 	pointerfocus(c, surface, sx, sy, time);
+}
+
+void
+movestack(const Arg *arg)
+{
+	Client *c, *sel = focustop(selmon);
+	if (!sel || sel->isfloating)
+		return;
+
+	if (arg->i > 0) {
+		wl_list_for_each(c, &sel->link, link) {
+			if (&c->link == &clients)
+				break;
+			if (VISIBLEON(c, selmon) && !c->isfloating) {
+				wl_list_remove(&sel->link);
+				wl_list_insert(&c->link, &sel->link);
+				break;
+			}
+		}
+	} else {
+		wl_list_for_each_reverse(c, &sel->link, link) {
+			if (&c->link == &clients)
+				break;
+			if (VISIBLEON(c, selmon) && !c->isfloating) {
+				wl_list_remove(&sel->link);
+				wl_list_insert(c->link.prev, &sel->link);
+				break;
+			}
+		}
+	}
+	arrange(selmon);
 }
 
 void
