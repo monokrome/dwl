@@ -12,17 +12,29 @@ DWLDEVCFLAGS = -g -Wpedantic -Wall -Wextra -Wdeclaration-after-statement \
 	-Wfloat-conversion
 
 # CFLAGS / LDFLAGS
-PKGS      = wayland-server xkbcommon libinput $(XLIBS)
+PKGS      = wayland-server xkbcommon libinput pixman-1 fcft $(XLIBS) dbus-1
 DWLCFLAGS = `$(PKG_CONFIG) --cflags $(PKGS)` $(WLR_INCS) $(DWLCPPFLAGS) $(DWLDEVCFLAGS) $(CFLAGS)
 LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
 
+TRAYOBJS = systray/watcher.o systray/tray.o systray/item.o systray/icon.o systray/menu.o systray/helpers.o
+TRAYDEPS = systray/watcher.h systray/tray.h systray/item.h systray/icon.h systray/menu.h systray/helpers.h
+
 all: dwl
-dwl: dwl.o util.o
-	$(CC) dwl.o util.o $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
-dwl.o: dwl.c client.h config.h config.mk cursor-shape-v1-protocol.h \
+dwl: dwl.o util.o dbus.o wallpaper.o $(TRAYOBJS)
+	$(CC) dwl.o util.o dbus.o wallpaper.o $(TRAYOBJS) $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
+dwl.o: dwl.c client.h dbus.h config.h config.mk cursor-shape-v1-protocol.h \
 	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
-	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h
+	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h \
+	wallpaper.h $(TRAYDEPS)
 util.o: util.c util.h
+dbus.o: dbus.c dbus.h
+wallpaper.o: wallpaper.c wallpaper.h stb_image.h
+systray/watcher.o: systray/watcher.c $(TRAYDEPS)
+systray/tray.o: systray/tray.c $(TRAYDEPS)
+systray/item.o: systray/item.c $(TRAYDEPS)
+systray/icon.o: systray/icon.c $(TRAYDEPS)
+systray/menu.o: systray/menu.c $(TRAYDEPS)
+systray/helpers.o: systray/helpers.c $(TRAYDEPS)
 
 # wayland-scanner is a tool which generates C headers and rigging for Wayland
 # protocols, which are specified in XML. wlroots requires you to rig these up
@@ -46,10 +58,37 @@ xdg-shell-protocol.h:
 	$(WAYLAND_SCANNER) server-header \
 		$(WAYLAND_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml $@
 
+# Default config: apply monokrome.patch to config.def.h
 config.h:
-	cp config.def.h $@
+	@if [ -f monokrome.patch ]; then \
+		echo "Applying monokrome.patch to config.def.h"; \
+		patch -o $@ config.def.h < monokrome.patch; \
+	else \
+		cp config.def.h $@; \
+	fi
+
+# Machine-specific builds: make sirius, make laptop, etc.
+# Applies monokrome.patch, then replaces monrules with machine-specific config from monitors/<name>.h
+sirius laptop desktop:
+	@if [ -f monitors/$@.h ]; then \
+		echo "Building for machine: $@"; \
+		if [ -f monokrome.patch ]; then \
+			echo "Applying monokrome.patch..."; \
+			patch -o config.h.tmp config.def.h < monokrome.patch; \
+		else \
+			cp config.def.h config.h.tmp; \
+		fi; \
+		sed '/MONITORS_PLACEHOLDER/,/^};/d' config.h.tmp | \
+		sed '/NOTE: ALWAYS add a fallback rule/r monitors/$@.h' > config.h; \
+		rm -f config.h.tmp; \
+		$(MAKE) dwl; \
+	else \
+		echo "No monitor config found: monitors/$@.h"; \
+		exit 1; \
+	fi
+
 clean:
-	rm -f dwl *.o *-protocol.h
+	rm -f dwl *.o *-protocol.h systray/*.o config.h config.h.tmp
 
 dist: clean
 	mkdir -p dwl-$(VERSION)

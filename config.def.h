@@ -14,6 +14,10 @@ static const float urgentcolor[]           = COLOR(0xff0000ff);
 /* This conforms to the xdg-protocol. Set the alpha to zero to restore the old behavior */
 static const float fullscreen_bg[]         = {0.0f, 0.0f, 0.0f, 1.0f}; /* You can also use glsl colors */
 
+/* wallpaper settings */
+static const char *wallpaper_dir           = "~/Pictures/Wallpapers"; /* directory containing subdirectories of wallpapers */
+static const int wallpaper_interval        = 300; /* seconds between wallpaper changes, 0 to disable slideshow */
+
 /* tagging - TAGCOUNT must be no greater than 31 */
 #define TAGCOUNT (9)
 
@@ -154,6 +158,13 @@ static const Key keys[] = {
 	TAGKEYS(          XKB_KEY_8, XKB_KEY_asterisk,                      7),
 	TAGKEYS(          XKB_KEY_9, XKB_KEY_parenleft,                     8),
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_q,           quit,             {0} },
+
+	/* Wallpaper image cycling */
+	{ MODKEY,                    XKB_KEY_bracketright, wallpapernextimg, {0} },
+	{ MODKEY,                    XKB_KEY_bracketleft,  wallpaperprevimg, {0} },
+	/* Wallpaper directory cycling */
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_braceright,   wallpapernextdir, {0} },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_braceleft,    wallpaperprevdir, {0} },
 
 	/* Ctrl-Alt-Backspace and Ctrl-Alt-Fx used to be handled by X server */
 	{ WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT,XKB_KEY_Terminate_Server, quit, {0} },
