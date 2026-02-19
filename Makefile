@@ -33,8 +33,8 @@ TRAYOBJS = systray/watcher.o systray/tray.o systray/item.o systray/icon.o systra
 TRAYDEPS = systray/watcher.h systray/tray.h systray/item.h systray/icon.h systray/menu.h systray/helpers.h
 
 all: dwl
-dwl: dwl.o util.o dbus.o wallpaper.o $(TRAYOBJS)
-	$(CC) dwl.o util.o dbus.o wallpaper.o $(TRAYOBJS) $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
+dwl: dwl.o util.o dbus.o wallpaper.o attached_surface.o wlr-attached-surface-protocol.o $(TRAYOBJS)
+	$(CC) dwl.o util.o dbus.o wallpaper.o attached_surface.o wlr-attached-surface-protocol.o $(TRAYOBJS) $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
 
 # Build with extras: Wren scripting + GLSL shader wallpapers
 extras: DWLCPPFLAGS += -DSCRIPTING -DEXTRAS $(WREN_INC) $(GLES_CFLAGS)
