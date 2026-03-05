@@ -6,7 +6,7 @@
 #include <string.h>
 #include <wordexp.h>
 
-#include "../wren/src/include/wren.h"
+#include <wren.h>
 #include "scripting.h"
 
 /*
