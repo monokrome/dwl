@@ -32,14 +32,17 @@ GLES_LIBS = `$(PKG_CONFIG) --libs glesv2 egl`
 TRAYOBJS = systray/watcher.o systray/tray.o systray/item.o systray/icon.o systray/menu.o systray/helpers.o
 TRAYDEPS = systray/watcher.h systray/tray.h systray/item.h systray/icon.h systray/menu.h systray/helpers.h
 
-all: dwl
+all:
+	@if [ -f .asan-build ]; then rm -f .asan-build; $(MAKE) clean; fi
+	@$(MAKE) dwl
 dwl: dwl.o util.o dbus.o wallpaper.o attached_surface.o wlr-attached-surface-protocol.o $(TRAYOBJS)
 	$(CC) dwl.o util.o dbus.o wallpaper.o attached_surface.o wlr-attached-surface-protocol.o $(TRAYOBJS) $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
 
 # Build with AddressSanitizer for debugging memory issues
-asan: CFLAGS += -fsanitize=address -fno-omit-frame-pointer
-asan: LDFLAGS += -fsanitize=address
-asan: clean dwl
+asan:
+	$(MAKE) clean
+	$(MAKE) dwl CFLAGS="$(CFLAGS) -fsanitize=address -fno-omit-frame-pointer" LDFLAGS="$(LDFLAGS) -fsanitize=address"
+	@touch .asan-build
 
 # Build with extras: Wren scripting + GLSL shader wallpapers
 EXTRAS_CFLAGS = $(DWLCFLAGS) -DSCRIPTING -DEXTRAS $(WREN_INC) $(GLES_CFLAGS)
@@ -116,7 +119,7 @@ sirius laptop desktop:
 	fi
 
 clean:
-	rm -f dwl *.o *-protocol.h *-protocol.c systray/*.o config.h.tmp
+	rm -f dwl *.o *-protocol.h *-protocol.c systray/*.o config.h.tmp .asan-build
 
 dist: clean
 	mkdir -p dwl-$(VERSION)
