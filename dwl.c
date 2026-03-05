@@ -971,7 +971,8 @@ cleanupmon(struct wl_listener *listener, void *data)
 	}
 
 	for (i = 0; i < LENGTH(m->pool); i++)
-		wlr_buffer_drop(&m->pool[i]->base);
+		if (m->pool[i])
+			wlr_buffer_drop(&m->pool[i]->base);
 
 	if (showsystray)
 		destroytray(m->tray);
@@ -3133,7 +3134,7 @@ setup(void)
 			wlr_log(WLR_ERROR, "Failed to create status FIFO: %s", strerror(errno));
 
 		/* Open FIFO with O_RDWR to prevent hangup when no writer connected */
-		status_fifo_fd = open(fifo_path, O_RDWR | O_NONBLOCK);
+		status_fifo_fd = open(fifo_path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
 		if (status_fifo_fd >= 0) {
 			status_event_source = wl_event_loop_add_fd(wl_display_get_event_loop(dpy),
 				status_fifo_fd, WL_EVENT_READABLE, statusin, NULL);
@@ -3215,8 +3216,11 @@ statusin(int fd, unsigned int mask, void *data)
 		wl_event_source_remove(status_event_source);
 
 	n = read(fd, status, sizeof(status) - 1);
-	if (n < 0 && errno != EWOULDBLOCK)
-		die("read:");
+	if (n <= 0) {
+		if (n < 0 && errno != EWOULDBLOCK)
+			die("read:");
+		return 0;
+	}
 
 	status[n] = '\0';
 	status[strcspn(status, "\n")] = '\0';
