@@ -451,7 +451,8 @@ static void load_image_file(const char *path) {
 		wlr_buffer_drop(&wp.buffer->base);
 	wp.buffer = buffer;
 
-	strncpy(wp.current_file, path, MAX_PATH - 1);
+	if (path != wp.current_file)
+		strncpy(wp.current_file, path, MAX_PATH - 1);
 }
 
 static void load_gradient_fallback(void) {
@@ -805,7 +806,8 @@ static int load_shader_file(const char *path) {
 
 	wp.is_shader = 1;
 	wp.shader_time = 0.0f;
-	strncpy(wp.current_file, path, MAX_PATH - 1);
+	if (path != wp.current_file)
+		strncpy(wp.current_file, path, MAX_PATH - 1);
 
 	/* Restore previous EGL state */
 	if (!eglMakeCurrent(display, prev_draw, prev_read, prev_context)) {
