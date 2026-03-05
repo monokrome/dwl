@@ -36,15 +36,25 @@ all: dwl
 dwl: dwl.o util.o dbus.o wallpaper.o attached_surface.o wlr-attached-surface-protocol.o $(TRAYOBJS)
 	$(CC) dwl.o util.o dbus.o wallpaper.o attached_surface.o wlr-attached-surface-protocol.o $(TRAYOBJS) $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
 
+# Build with AddressSanitizer for debugging memory issues
+asan: CFLAGS += -fsanitize=address -fno-omit-frame-pointer
+asan: LDFLAGS += -fsanitize=address
+asan: clean dwl
+
 # Build with extras: Wren scripting + GLSL shader wallpapers
-extras: DWLCPPFLAGS += -DSCRIPTING -DEXTRAS $(WREN_INC) $(GLES_CFLAGS)
-extras: dwl.o util.o dbus.o wallpaper.o scripting.o attached_surface.o wlr-attached-surface-protocol.o $(TRAYOBJS)
-	$(CC) $(WREN_SRC) dwl.o util.o dbus.o wallpaper.o scripting.o attached_surface.o wlr-attached-surface-protocol.o $(TRAYOBJS) $(DWLCFLAGS) $(WREN_INC) $(GLES_CFLAGS) $(LDFLAGS) $(LDLIBS) $(GLES_LIBS) -o dwl
+EXTRAS_CFLAGS = $(DWLCFLAGS) -DSCRIPTING -DEXTRAS $(WREN_INC) $(GLES_CFLAGS)
+dwl-extras.o: dwl.c client.h dbus.h config.h config.mk cursor-shape-v1-protocol.h \
+	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
+	wlr-output-power-management-unstable-v1-protocol.h \
+	wlr-attached-surface-unstable-v1-protocol.h xdg-shell-protocol.h \
+	attached_surface.h wallpaper.h $(TRAYDEPS)
+	$(CC) $(CPPFLAGS) $(EXTRAS_CFLAGS) -o $@ -c dwl.c
+extras: dwl-extras.o util.o dbus.o wallpaper.o scripting.o attached_surface.o wlr-attached-surface-protocol.o $(TRAYOBJS)
+	$(CC) $(WREN_SRC) dwl-extras.o util.o dbus.o wallpaper.o scripting.o attached_surface.o wlr-attached-surface-protocol.o $(TRAYOBJS) $(EXTRAS_CFLAGS) $(LDFLAGS) $(LDLIBS) $(GLES_LIBS) -o dwl
 
 scripting.o: scripting.c scripting.h
-	$(CC) $(CPPFLAGS) $(DWLCFLAGS) -DSCRIPTING -DEXTRAS $(WREN_INC) $(GLES_CFLAGS) -o $@ -c $<
+	$(CC) $(CPPFLAGS) $(EXTRAS_CFLAGS) -o $@ -c $<
 attached_surface.o: attached_surface.c attached_surface.h wlr-attached-surface-unstable-v1-protocol.h
-	$(CC) $(CPPFLAGS) $(DWLCFLAGS) -DSCRIPTING -DEXTRAS $(WREN_INC) $(GLES_CFLAGS) -o $@ -c $<
 wlr-attached-surface-protocol.o: wlr-attached-surface-protocol.c
 	$(CC) $(CPPFLAGS) $(DWLCFLAGS) -o $@ -c $<
 dwl.o: dwl.c client.h dbus.h config.h config.mk cursor-shape-v1-protocol.h \
