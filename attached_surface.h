@@ -46,18 +46,25 @@ struct AttachedSurface {
 	struct wl_listener surface_commit;
 	struct wl_listener surface_destroy;
 	struct wl_listener parent_destroy;
+	struct wl_listener scene_destroy;
 
 	struct wl_list link; /* attached_surfaces list */
 };
 
-/* Initialize the attached surface manager global */
-void attached_surface_init(struct wl_display *display, struct wlr_output_layout *layout);
+/* Initialize the attached surface manager global.
+ * overlay_layer is the scene tree where overlays are rendered (above normal windows). */
+void attached_surface_init(struct wl_display *display, struct wlr_output_layout *layout,
+		struct wlr_scene_tree *overlay_layer);
 
 /* Clean up */
 void attached_surface_finish(void);
 
-/* Update all attached surface positions (call after parent moves) */
+/* Update all attached surface positions (call after parent moves/resizes) */
 void attached_surface_update_positions(void);
+
+/* Show overlays for the focused toplevel, hide all others.
+ * Pass NULL to hide all overlays (no focus). */
+void attached_surface_set_focus(struct wlr_xdg_toplevel *focused);
 
 /* Get list of all attached surfaces */
 struct wl_list *attached_surface_get_list(void);

@@ -1875,6 +1875,7 @@ focusclient(Client *c, int lift)
 	if (!c) {
 		/* With no client, all we have left is to clear focus */
 		wlr_seat_keyboard_notify_clear_focus(seat);
+		attached_surface_set_focus(NULL);
 		return;
 	}
 
@@ -1886,6 +1887,11 @@ focusclient(Client *c, int lift)
 
 	/* Activate the new client */
 	client_activate_surface(client_surface(c), 1);
+
+	/* Show/hide attached surface overlays based on focused toplevel */
+	attached_surface_set_focus(
+		c->type == XDGShell ? c->surface.xdg->toplevel : NULL);
+
 	scripting_on_client_focus(c);
 }
 
@@ -3032,7 +3038,7 @@ setup(void)
 	wl_signal_add(&layer_shell->events.new_surface, &new_layer_surface);
 
 	/* Set up attached surface protocol */
-	attached_surface_init(dpy, output_layout);
+	attached_surface_init(dpy, output_layout, layers[LyrOverlay]);
 
 	idle_notifier = wlr_idle_notifier_v1_create(dpy);
 

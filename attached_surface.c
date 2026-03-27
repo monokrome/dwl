@@ -12,10 +12,26 @@ static struct wl_global *manager_global = NULL;
 static struct wl_list attached_surfaces;
 static uint32_t serial_counter = 0;
 static struct wlr_output_layout *output_layout = NULL;
+static struct wlr_scene_tree *overlay_layer = NULL;
+static struct wlr_xdg_toplevel *focused_toplevel = NULL;
 
 static void attached_surface_destroy(AttachedSurface *as);
 
-/* --- Attached Surface Implementation --- */
+/* Get parent's absolute position via its scene tree */
+static int get_parent_position(AttachedSurface *as, int *px, int *py)
+{
+	struct wlr_scene_tree *parent_tree;
+
+	if (!as->parent || !as->parent->base || !as->parent->base->surface)
+		return 0;
+
+	parent_tree = as->parent->base->surface->data;
+	if (!parent_tree)
+		return 0;
+
+	wlr_scene_node_coords(&parent_tree->node, px, py);
+	return 1;
+}
 
 /* Get the available space for an attached surface based on screen bounds */
 static void get_constrained_size(AttachedSurface *as, uint32_t requested_w, uint32_t requested_h,
@@ -28,103 +44,102 @@ static void get_constrained_size(AttachedSurface *as, uint32_t requested_w, uint
 	*out_w = requested_w;
 	*out_h = requested_h;
 
-	if (!output_layout || !as->parent)
+	if (!output_layout || !get_parent_position(as, &parent_x, &parent_y))
 		return;
 
-	/* Safely get parent's scene tree - check all intermediate pointers */
-	if (!as->parent->base || !as->parent->base->surface)
-		return;
+	/* Find the monitor the parent is on and constrain to that */
+	struct wlr_output *output = wlr_output_layout_output_at(
+		output_layout, parent_x, parent_y);
+	wlr_output_layout_get_box(output_layout, output, &output_box);
 
-	/* Get parent's absolute position */
-	struct wlr_scene_tree *parent_tree = as->parent->base->surface->data;
-	if (parent_tree) {
-		wlr_scene_node_coords(&parent_tree->node, &parent_x, &parent_y);
-	}
-
-	/* Get total output layout bounds */
-	wlr_output_layout_get_box(output_layout, NULL, &output_box);
-
-	/* Calculate available space based on anchor */
 	switch (as->pending_anchor) {
 	case ATTACHED_ANCHOR_RIGHT:
-		/* Space from right edge of parent to right edge of screen */
 		available_w = (output_box.x + output_box.width) - (parent_x + as->parent->current.width + as->pending_anchor_margin);
 		available_h = output_box.height;
 		break;
 	case ATTACHED_ANCHOR_LEFT:
-		/* Space from left edge of screen to left edge of parent */
 		available_w = parent_x - as->pending_anchor_margin - output_box.x;
 		available_h = output_box.height;
 		break;
 	case ATTACHED_ANCHOR_TOP:
-		/* Space from top edge of screen to top edge of parent */
 		available_w = output_box.width;
 		available_h = parent_y - as->pending_anchor_margin - output_box.y;
 		break;
 	case ATTACHED_ANCHOR_BOTTOM:
-		/* Space from bottom edge of parent to bottom edge of screen */
 		available_w = output_box.width;
 		available_h = (output_box.y + output_box.height) - (parent_y + as->parent->current.height + as->pending_anchor_margin);
 		break;
 	default:
-		/* No anchor - just use full screen bounds for now */
 		available_w = output_box.width;
 		available_h = output_box.height;
 		break;
 	}
 
-	/* Constrain to available space (but don't go below 1) */
 	if (available_w > 0 && (uint32_t)available_w < requested_w)
 		*out_w = (uint32_t)available_w;
 	if (available_h > 0 && (uint32_t)available_h < requested_h)
 		*out_h = (uint32_t)available_h;
 
-	/* Minimum size of 1x1 */
 	if (*out_w == 0) *out_w = 1;
 	if (*out_h == 0) *out_h = 1;
 }
 
-/* Calculate position based on anchor, parent geometry, and surface size */
-static void calculate_anchored_position(AttachedSurface *as, int32_t *out_x, int32_t *out_y)
+/* Calculate absolute position based on anchor + parent position */
+static void calculate_absolute_position(AttachedSurface *as, int32_t *out_x, int32_t *out_y)
 {
-	int32_t x = 0, y = 0;
-	int32_t parent_width, parent_height;
+	int parent_x = 0, parent_y = 0;
+	int32_t rel_x, rel_y;
 
-	if (!as->parent || as->anchor == ATTACHED_ANCHOR_NONE) {
+	if (!get_parent_position(as, &parent_x, &parent_y)) {
 		*out_x = as->x;
 		*out_y = as->y;
 		return;
 	}
 
-	/* Get parent geometry from toplevel current state */
-	parent_width = as->parent->current.width;
-	parent_height = as->parent->current.height;
+	if (as->anchor == ATTACHED_ANCHOR_NONE) {
+		*out_x = parent_x + as->x;
+		*out_y = parent_y + as->y;
+		return;
+	}
 
 	switch (as->anchor) {
 	case ATTACHED_ANCHOR_RIGHT:
-		x = parent_width + as->anchor_margin;
-		y = as->anchor_offset;
+		rel_x = as->parent->current.width + as->anchor_margin;
+		rel_y = as->anchor_offset;
 		break;
 	case ATTACHED_ANCHOR_LEFT:
-		x = -(int32_t)as->width - as->anchor_margin;
-		y = as->anchor_offset;
+		rel_x = -(int32_t)as->width - as->anchor_margin;
+		rel_y = as->anchor_offset;
 		break;
 	case ATTACHED_ANCHOR_TOP:
-		x = as->anchor_offset;
-		y = -(int32_t)as->height - as->anchor_margin;
+		rel_x = as->anchor_offset;
+		rel_y = -(int32_t)as->height - as->anchor_margin;
 		break;
 	case ATTACHED_ANCHOR_BOTTOM:
-		x = as->anchor_offset;
-		y = parent_height + as->anchor_margin;
+		rel_x = as->anchor_offset;
+		rel_y = as->parent->current.height + as->anchor_margin;
 		break;
 	default:
-		x = as->x;
-		y = as->y;
+		rel_x = 0;
+		rel_y = 0;
 		break;
 	}
 
-	*out_x = x;
-	*out_y = y;
+	*out_x = parent_x + rel_x;
+	*out_y = parent_y + rel_y;
+}
+
+static void update_scene_position(AttachedSurface *as)
+{
+	int32_t abs_x, abs_y;
+
+	if (!as->scene)
+		return;
+
+	calculate_absolute_position(as, &abs_x, &abs_y);
+	as->x = abs_x;
+	as->y = abs_y;
+	wlr_scene_node_set_position(&as->scene->node, abs_x, abs_y);
 }
 
 static void handle_set_anchor(struct wl_client *client,
@@ -137,16 +152,11 @@ static void handle_set_anchor(struct wl_client *client,
 	as->pending_anchor_margin = margin;
 	as->pending_anchor_offset = offset;
 
-	/* Apply immediately if already mapped */
 	if (as->mapped && as->scene) {
-		int32_t x, y;
 		as->anchor = as->pending_anchor;
 		as->anchor_margin = as->pending_anchor_margin;
 		as->anchor_offset = as->pending_anchor_offset;
-		calculate_anchored_position(as, &x, &y);
-		as->x = x;
-		as->y = y;
-		wlr_scene_node_set_position(&as->scene->node, x, y);
+		update_scene_position(as);
 	}
 }
 
@@ -158,12 +168,8 @@ static void handle_set_position(struct wl_client *client,
 	as->pending_x = x;
 	as->pending_y = y;
 
-	/* Apply position immediately if already mapped and not anchored */
-	if (as->mapped && as->scene && as->anchor == ATTACHED_ANCHOR_NONE) {
-		as->x = x;
-		as->y = y;
-		wlr_scene_node_set_position(&as->scene->node, x, y);
-	}
+	if (as->mapped && as->scene && as->anchor == ATTACHED_ANCHOR_NONE)
+		update_scene_position(as);
 }
 
 static void handle_set_size(struct wl_client *client,
@@ -180,9 +186,8 @@ static void handle_ack_configure(struct wl_client *client,
 {
 	AttachedSurface *as = wl_resource_get_user_data(resource);
 	if (!as) return;
-	if (serial == as->configure_serial) {
+	if (serial == as->configure_serial)
 		as->configured = 1;
-	}
 }
 
 static void handle_surface_destroy(struct wl_client *client,
@@ -202,17 +207,16 @@ static const struct zwlr_attached_surface_v1_interface attached_surface_impl = {
 static void attached_surface_resource_destroy(struct wl_resource *resource)
 {
 	AttachedSurface *as = wl_resource_get_user_data(resource);
-	if (as) {
+	if (as)
 		attached_surface_destroy(as);
-	}
 }
 
 static void handle_surface_commit(struct wl_listener *listener, void *data)
 {
 	AttachedSurface *as = wl_container_of(listener, as, surface_commit);
-	int32_t x, y;
+	int is_focused;
 
-	/* On first commit (before configured), send configure with constrained size */
+	/* On first commit, send configure with constrained size */
 	if (as->configure_serial == 0) {
 		uint32_t constrained_w, constrained_h;
 		get_constrained_size(as, as->pending_width, as->pending_height,
@@ -223,30 +227,32 @@ static void handle_surface_commit(struct wl_listener *listener, void *data)
 		return;
 	}
 
-	if (!as->configured) {
+	if (!as->configured)
 		return;
-	}
 
 	/* Apply pending state */
-	as->x = as->pending_x;
-	as->y = as->pending_y;
 	as->width = as->pending_width;
 	as->height = as->pending_height;
 	as->anchor = as->pending_anchor;
 	as->anchor_margin = as->pending_anchor_margin;
 	as->anchor_offset = as->pending_anchor_offset;
 
-	/* Calculate position (anchored or manual) */
-	calculate_anchored_position(as, &x, &y);
-	as->x = x;
-	as->y = y;
+	update_scene_position(as);
 
-	/* Update scene node position relative to parent (scene is already parented) */
 	if (as->scene) {
-		wlr_scene_node_set_position(&as->scene->node, as->x, as->y);
-		wlr_scene_node_set_enabled(&as->scene->node, 1);
 		as->mapped = 1;
+		/* Only show if parent is currently focused */
+		is_focused = as->parent && as->parent == focused_toplevel;
+		wlr_scene_node_set_enabled(&as->scene->node, is_focused);
 	}
+}
+
+static void handle_scene_destroy(struct wl_listener *listener, void *data)
+{
+	AttachedSurface *as = wl_container_of(listener, as, scene_destroy);
+	as->scene = NULL;
+	wl_list_remove(&as->scene_destroy.link);
+	wl_list_init(&as->scene_destroy.link);
 }
 
 static void handle_wlr_surface_destroy(struct wl_listener *listener, void *data)
@@ -259,13 +265,15 @@ static void handle_parent_destroy(struct wl_listener *listener, void *data)
 {
 	AttachedSurface *as = wl_container_of(listener, as, parent_destroy);
 
-	/* Send closed event to client */
 	zwlr_attached_surface_v1_send_closed(as->resource);
 
-	/* Scene node is a child of parent's tree, so it's already being destroyed.
-	 * Set to NULL so we don't try to destroy it again in attached_surface_destroy. */
-	as->scene = NULL;
+	/* Scene is in overlay layer (not parented to parent's tree), so we
+	 * need to hide it but don't need to NULL it — cleanup in destroy. */
+	if (as->scene)
+		wlr_scene_node_set_enabled(&as->scene->node, 0);
+
 	as->parent = NULL;
+	as->mapped = 0;
 	wl_list_remove(&as->parent_destroy.link);
 	wl_list_init(&as->parent_destroy.link);
 }
@@ -277,11 +285,11 @@ static void attached_surface_destroy(AttachedSurface *as)
 	wl_list_remove(&as->link);
 	wl_list_remove(&as->surface_commit.link);
 	wl_list_remove(&as->surface_destroy.link);
-	if (as->parent) {
+	if (as->parent)
 		wl_list_remove(&as->parent_destroy.link);
-	}
 
 	if (as->scene) {
+		wl_list_remove(&as->scene_destroy.link);
 		wlr_scene_node_destroy(&as->scene->node);
 	}
 
@@ -308,9 +316,6 @@ static void manager_handle_get_attached_surface(struct wl_client *client,
 		return;
 	}
 
-	/* The parent_resource might be an xdg_toplevel resource.
-	 * wlr_xdg_toplevel_from_resource will assert if wrong type,
-	 * and return NULL if the toplevel has been destroyed. */
 	if (!parent_resource) {
 		wl_resource_post_error(resource,
 			ZWLR_ATTACHED_SURFACE_MANAGER_V1_ERROR_INVALID_PARENT,
@@ -347,26 +352,31 @@ static void manager_handle_get_attached_surface(struct wl_client *client,
 	as->surface = surface;
 	as->parent = parent;
 
-	/* Create scene tree as child of parent's scene tree so it moves with parent */
-	struct wlr_scene_tree *parent_tree = parent->base->surface->data;
-	if (!parent_tree) {
+	/* Verify the surface doesn't already have a role */
+	if (surface->role) {
 		wl_resource_post_error(resource,
-			ZWLR_ATTACHED_SURFACE_MANAGER_V1_ERROR_INVALID_PARENT,
-			"parent has no scene tree");
+			ZWLR_ATTACHED_SURFACE_MANAGER_V1_ERROR_ROLE,
+			"surface already has a role");
+		wl_resource_set_user_data(as->resource, NULL);
 		free(as);
 		return;
 	}
 
-	as->scene = wlr_scene_subsurface_tree_create(parent_tree, surface);
+	/* Create scene tree in the overlay layer (above normal windows) */
+	as->scene = wlr_scene_subsurface_tree_create(overlay_layer, surface);
 	if (!as->scene) {
+		wl_resource_set_user_data(as->resource, NULL);
 		wl_resource_destroy(as->resource);
 		free(as);
 		wl_client_post_no_memory(client);
 		return;
 	}
-	wlr_scene_node_set_enabled(&as->scene->node, 0); /* Hidden until configured */
+	wlr_scene_node_set_enabled(&as->scene->node, 0);
 
 	/* Set up listeners */
+	as->scene_destroy.notify = handle_scene_destroy;
+	wl_signal_add(&as->scene->node.events.destroy, &as->scene_destroy);
+
 	as->surface_commit.notify = handle_surface_commit;
 	wl_signal_add(&surface->events.commit, &as->surface_commit);
 
@@ -378,9 +388,6 @@ static void manager_handle_get_attached_surface(struct wl_client *client,
 
 	wl_list_insert(&attached_surfaces, &as->link);
 
-	/* Don't send configure here - wait for initial commit so client
-	 * has a chance to call set_size first. We'll send configure in
-	 * handle_surface_commit when we see the first commit. */
 	as->pending_width = 0;
 	as->pending_height = 0;
 	as->configured = 0;
@@ -412,9 +419,11 @@ static void manager_bind(struct wl_client *client, void *data,
 
 /* --- Public API --- */
 
-void attached_surface_init(struct wl_display *display, struct wlr_output_layout *layout)
+void attached_surface_init(struct wl_display *display, struct wlr_output_layout *layout,
+		struct wlr_scene_tree *layer)
 {
 	output_layout = layout;
+	overlay_layer = layer;
 	wl_list_init(&attached_surfaces);
 
 	manager_global = wl_global_create(display,
@@ -437,19 +446,34 @@ void attached_surface_finish(void)
 void attached_surface_update_positions(void)
 {
 	AttachedSurface *as;
-	int32_t x, y;
+	int32_t abs_x, abs_y;
 
-	/* Recalculate positions for anchored surfaces when parent resizes */
 	wl_list_for_each(as, &attached_surfaces, link) {
-		if (!as->mapped || !as->scene || as->anchor == ATTACHED_ANCHOR_NONE)
+		if (!as->mapped || !as->scene || !as->parent)
 			continue;
 
-		calculate_anchored_position(as, &x, &y);
-		if (x != as->x || y != as->y) {
-			as->x = x;
-			as->y = y;
-			wlr_scene_node_set_position(&as->scene->node, x, y);
+		calculate_absolute_position(as, &abs_x, &abs_y);
+		if (abs_x != as->x || abs_y != as->y) {
+			as->x = abs_x;
+			as->y = abs_y;
+			wlr_scene_node_set_position(&as->scene->node, abs_x, abs_y);
 		}
+	}
+}
+
+void attached_surface_set_focus(struct wlr_xdg_toplevel *focused)
+{
+	AttachedSurface *as;
+	int show;
+
+	focused_toplevel = focused;
+
+	wl_list_for_each(as, &attached_surfaces, link) {
+		if (!as->mapped || !as->scene)
+			continue;
+
+		show = as->parent && as->parent == focused;
+		wlr_scene_node_set_enabled(&as->scene->node, show);
 	}
 }
 
